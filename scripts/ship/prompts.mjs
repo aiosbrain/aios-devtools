@@ -14,7 +14,7 @@
  * — docs/v1-operator-loop/domains/safety-unit-extraction.md). No prompt wording, section contract,
  * or parsing rule is edited in this move.
  */
-import { constitutionPromptLines } from "../constitution.mjs";
+import { constitutionPromptLines } from "@aiosbrain/foundation/constitution";
 import { PLAN_READY_TOKEN } from "../relay-core.mjs";
 import { formatFindings, extractSections } from "../spec-eval.mjs";
 import { SAFETY_APPROVED_TOKEN } from "./gates.mjs";

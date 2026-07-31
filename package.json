@@ -1,0 +1,19 @@
+{
+  "name": "@aiosbrain/aios-devtools",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AIOS devtools — the ship/build/roadmap-run/spec-eval/spec-publish/consolidate-findings command set, cut from aiosbrain/aios-workspace (AIO-594). Toolkit-seam functionality requires an AIOS toolkit checkout via AIOS_TOOLKIT_DIR or --toolkit-dir (docs/devtools-toolkit-contract.md).",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "test": "node --test --test-force-exit test/",
+    "lint": "find scripts test -name '*.mjs' -print0 | xargs -0 -n1 node --check"
+  },
+  "dependencies": {
+    "@aiosbrain/foundation": "^0.1.0",
+    "@anthropic-ai/sdk": "^0.115.0"
+  }
+}

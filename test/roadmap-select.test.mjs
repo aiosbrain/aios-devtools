@@ -4,7 +4,7 @@
 // whose blocker isn't Done, and skips assigned / non-Todo. Run: node test/roadmap-select.test.mjs
 
 import { selectNextIssue, rankEligible, isUnblocked, skipReason } from "../scripts/roadmap-run.mjs";
-import { normalizeBlockedBy } from "../scripts/linear-client.mjs";
+import { normalizeBlockedBy } from "@aiosbrain/foundation/linear-client";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

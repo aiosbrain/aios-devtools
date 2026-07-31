@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { createLinearClient, resolveLinearApiKey } from "./linear-client.mjs";
+import { createLinearClient, resolveLinearApiKey } from "@aiosbrain/foundation/linear-client";
 import { defaultScanFile } from "./scan-file.mjs";
 import { loadSkillContext, skillSha256 } from "./skill-context.mjs";
 

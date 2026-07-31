@@ -11,7 +11,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { parseFlatYaml } from "./flat-yaml.mjs";
+import { parseFlatYaml } from "@aiosbrain/foundation/internal/flat-yaml";
 import { die } from "./relay-core.mjs";
 import {
   modelFamily,

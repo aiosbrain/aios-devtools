@@ -18,8 +18,8 @@ import { fileURLToPath } from "node:url";
 import { c, callClaudeAgent, NO_TOOLS_ARGS } from "./relay-core.mjs";
 import { SHIP_EXIT } from "./ship.mjs";
 import { DEFAULT_MODELS } from "./loop-models.mjs";
-import { parseFlatYaml } from "./flat-yaml.mjs";
-import { createLinearClient, resolveLinearApiKey, normalizeBlockedBy } from "./linear-client.mjs";
+import { parseFlatYaml } from "@aiosbrain/foundation/internal/flat-yaml";
+import { createLinearClient, resolveLinearApiKey, normalizeBlockedBy } from "@aiosbrain/foundation/linear-client";
 
 const DEFAULT_MAX_ISSUES = 3;
 const ISSUE_RE = /^AIO-\d+$/;

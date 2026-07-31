@@ -55,7 +55,7 @@ import { loadToolkitModule } from "./toolkit-locate.mjs";
 import { resolveLoopModels } from "./loop-models.mjs";
 import { parseModelRef } from "./model-providers.mjs";
 import { cmdPr } from "./pr.mjs";
-import { loadConstitutionDigest, constitutionPromptLines } from "./constitution.mjs";
+import { loadConstitutionDigest, constitutionPromptLines } from "@aiosbrain/foundation/constitution";
 import { loadSkillContext, parseDeclaredSkills } from "./skill-context.mjs";
 
 const DEFAULT_REVIEW_SKILL = "/ai-code-review";

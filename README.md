@@ -1,0 +1,56 @@
+# aios-devtools
+
+The AIOS devtools command set — `ship`, `build`, `roadmap-run`, `spec-eval`,
+`spec-publish`, `consolidate-findings` — split out of the AIOS workspace toolkit.
+
+## Provenance
+
+Cut from **`aiosbrain/aios-workspace` @ `10099cd8b01bade40fd16f296fa523ef20b228c3`**
+(AIO-594) via `git filter-repo` over the declared extraction + copy path manifests.
+History for every travelling file is preserved (`git log --follow` depth matches core).
+Copied-infrastructure files are temporary duplicates with a 7-day convergence
+deadline — see `NOTES.md` for the full copy ledger.
+
+## The toolkit contract
+
+This repo is standalone for its own logic, but the stays-core engines (review-bugbot,
+simplify, relay, spec-author) and core-owned content are reached **only** through the
+toolkit-location seam (`scripts/toolkit-locate.mjs`). Toolkit-seam functionality
+requires an AIOS toolkit checkout, located via (in precedence order):
+
+1. `--toolkit-dir <path>` (CLI flag)
+2. `AIOS_TOOLKIT_DIR=<path>` (environment)
+3. the containing repo root, when this code runs inside an `aios-workspace` checkout
+
+Without a toolkit, seam-dependent paths fail with an actionable locator error (never
+an import crash), and toolkit-dependent tests **skip with a named reason**. The full
+contract: `docs/devtools-toolkit-contract.md`.
+
+```bash
+export AIOS_TOOLKIT_DIR=/path/to/aios-workspace   # npm ci'd checkout
+npm ci
+npm test        # node --test over test/ — green with the toolkit; toolkit-dependent files skip without it
+npm run lint    # node --check sweep over scripts/ + test/
+```
+
+## Entrypoint semantics
+
+All six command modules load and run standalone (their full static import graph
+resolves without a toolkit checkout):
+
+| Entry | `--help` behavior |
+|-------|-------------------|
+| `scripts/ship.mjs` (`cmdShip`) | usage printed, exit 0 |
+| `scripts/build.mjs` (`cmdBuild`) | usage printed, exit 0 |
+| `scripts/roadmap-run.mjs` (`cmdRoadmapRun`) | usage printed, exit 0 |
+| `scripts/spec-eval.mjs` (`cmdSpec`) | usage printed, exit 0 |
+| `scripts/consolidate-findings.mjs` (`cmdConsolidateFindings`) | usage printed, exit 0 |
+| `scripts/spec-publish.mjs` (`cmdSpecPublish`) | throws its own usage error (`SpecPublishError`) **by design** — there is no `--help` path in the function; behavior is byte-identical to the in-monorepo dispatch. Not an import crash. |
+
+So: **5 entries exit 0 with usage; `cmdSpecPublish` exits with its designed usage
+error** — parity with core, not six clean exits.
+
+## Governance
+
+Stamped by `aios repo-bootstrap` (worktree guard pack, file-size gate,
+boundary gate, leak gate, CI skeleton) — see `ENGINEERING-CONSTITUTION.md`.

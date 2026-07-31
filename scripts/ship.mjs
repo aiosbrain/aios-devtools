@@ -34,7 +34,7 @@ import { cmdConsolidateFindings, defaultOutPath } from "./consolidate-findings.m
 import { resolveLoopModels } from "./loop-models.mjs";
 import { modelFamily } from "./model-providers.mjs";
 import { callPromptModel, callAgentModel, reviewCallForModel } from "./model-call.mjs";
-import { createLinearClient, resolveLinearApiKey, extractRepoFileRefs } from "./linear-client.mjs";
+import { createLinearClient, resolveLinearApiKey, extractRepoFileRefs } from "@aiosbrain/foundation/linear-client";
 import {
   evaluateSpec,
   loadRubric,
@@ -47,7 +47,7 @@ import {
 // Core-staying engines (review-bugbot, simplify) load via the toolkit seam at point-of-use —
 // never a static import (AIO-594 F1/F6; docs/devtools-toolkit-contract.md).
 import { loadToolkitModule } from "./toolkit-locate.mjs";
-import { loadConstitutionDigest } from "./constitution.mjs";
+import { loadConstitutionDigest } from "@aiosbrain/foundation/constitution";
 import { loadSkillContext, parseDeclaredSkills } from "./skill-context.mjs";
 
 import {
