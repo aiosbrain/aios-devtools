@@ -20,13 +20,13 @@ import { SHIP_EXIT } from "./ship.mjs";
 import { DEFAULT_MODELS } from "./loop-models.mjs";
 import { parseFlatYaml } from "@aiosbrain/foundation/internal/flat-yaml";
 import { createLinearClient, resolveLinearApiKey, normalizeBlockedBy } from "@aiosbrain/foundation/linear-client";
-
+import { stripToolkitDirArgs } from "./toolkit-locate.mjs";
 const DEFAULT_MAX_ISSUES = 3;
 const ISSUE_RE = /^AIO-\d+$/;
-
 // ── pure helpers (exported for tests) ───────────────────────────────────────────────────────
 
 export function parseRoadmapArgs(args) {
+  args = stripToolkitDirArgs(args);
   const flag = (name) => {
     const i = args.indexOf(name);
     return i >= 0 ? args[i + 1] : null;

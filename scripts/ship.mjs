@@ -46,10 +46,9 @@ import {
 } from "./spec-eval.mjs";
 // Core-staying engines (review-bugbot, simplify) load via the toolkit seam at point-of-use —
 // never a static import (AIO-594 F1/F6; docs/devtools-toolkit-contract.md).
-import { loadToolkitModule } from "./toolkit-locate.mjs";
+import { loadToolkitModule, stripToolkitDirArgs } from "./toolkit-locate.mjs";
 import { loadConstitutionDigest } from "@aiosbrain/foundation/constitution";
 import { loadSkillContext, parseDeclaredSkills } from "./skill-context.mjs";
-
 import {
   parseShipArgs,
   validateShipArgs,
@@ -1630,6 +1629,7 @@ function usage() {
  * cmdShip(repo, args, deps={}) → numeric exit code (SHIP_EXIT). Dispatch owns process.exit.
  */
 export async function cmdShip(repo, args, deps = {}) {
+  args = stripToolkitDirArgs(args);
   const opts = parseShipArgs(args);
   if (opts.help) {
     usage();

@@ -38,6 +38,31 @@ export function looksLikeToolkit(dir) {
   return missingMarkers(dir).length === 0;
 }
 
+function requireToolkitDirValue(value) {
+  if (!value || value.startsWith("-")) {
+    throw new Error(
+      "--toolkit-dir requires a path argument (got " +
+        (value ? `'${value}'` : "nothing") +
+        "). Pass --toolkit-dir <toolkit-checkout>, or drop the flag to use AIOS_TOOLKIT_DIR."
+    );
+  }
+  return value;
+}
+
+/** Remove the global toolkit selector before command-specific positional parsing. */
+export function stripToolkitDirArgs(argv = []) {
+  const normalized = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] !== "--toolkit-dir") {
+      normalized.push(argv[i]);
+      continue;
+    }
+    requireToolkitDirValue(argv[i + 1]);
+    i++;
+  }
+  return normalized;
+}
+
 /**
  * Resolve the toolkit checkout per the contract above.
  * @param {{toolkitDir?: string, argv?: string[], env?: Record<string,string|undefined>,
@@ -58,14 +83,7 @@ export function locateToolkit({
   } else if (i !== -1) {
     // A PRESENT flag is an explicit source: a missing value (trailing flag, or another option
     // where the path should be) is a hard, actionable error — never a silent fall-through.
-    const value = argv[i + 1];
-    if (!value || value.startsWith("--")) {
-      throw new Error(
-        "--toolkit-dir requires a path argument (got " +
-          (value ? `'${value}'` : "nothing") +
-          "). Pass --toolkit-dir <toolkit-checkout>, or drop the flag to use AIOS_TOOLKIT_DIR."
-      );
-    }
+    const value = requireToolkitDirValue(argv[i + 1]);
     candidate = { dir: value, source: "--toolkit-dir" };
   } else if (env.AIOS_TOOLKIT_DIR) {
     candidate = { dir: env.AIOS_TOOLKIT_DIR, source: "AIOS_TOOLKIT_DIR" };

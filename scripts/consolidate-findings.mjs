@@ -48,13 +48,12 @@ import {
   rankSeverity,
 } from "./severity.mjs";
 import { DIFF_CAP } from "./build.mjs";
-
+import { stripToolkitDirArgs } from "./toolkit-locate.mjs";
 const ISSUE_RE = /^AIO-\d+$/;
 // Cap the GPT-5.5 review markdown fed to the model (documented, tunable via this const).
 // The PR diff shares build.mjs's DIFF_CAP so the two caps never silently drift.
 export const GPT_REVIEW_CAP = 20000;
 export const DEFAULT_CONSOLIDATE_TIMEOUT = 300; // seconds
-
 // CI states/conclusions that mean the board is red (block-worthy).
 const CI_RED = new Set([
   "FAILURE",
@@ -101,6 +100,7 @@ const REVIEWER_PROMPT_REL = path.join(".claude", "agents", "code-reviewer.md");
 // ── pure helpers (exported for tests) ─────────────────────────────────────────
 
 export function parseConsolidateArgs(args) {
+  args = stripToolkitDirArgs(args);
   const flag = (name) => {
     const i = args.indexOf(name);
     return i >= 0 ? args[i + 1] : null;

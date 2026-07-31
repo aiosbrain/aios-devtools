@@ -13,6 +13,7 @@ import {
   looksLikeToolkit,
   locateToolkit,
   loadToolkitModule,
+  stripToolkitDirArgs,
 } from "../scripts/toolkit-locate.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -65,6 +66,14 @@ test("--toolkit-dir flag wins over env", () => {
   }
 });
 
+test("shared arg normalizer accepts the flag before or after command positions without mutation", () => {
+  const before = ["--toolkit-dir", "/tmp/toolkit", "plan.md", "--json"];
+  const after = ["plan.md", "--json", "--toolkit-dir", "/tmp/toolkit"];
+  assert.deepEqual(stripToolkitDirArgs(before), ["plan.md", "--json"]);
+  assert.deepEqual(stripToolkitDirArgs(after), ["plan.md", "--json"]);
+  assert.deepEqual(before, ["--toolkit-dir", "/tmp/toolkit", "plan.md", "--json"]);
+});
+
 // SPLIT (AIO-594 cut): the "containing repo root is the in-monorepo fallback" and
 // "loadToolkitModule loads the same core module instance as a static import" subtests
 // assert that the CONTAINING repo is a toolkit — true only in-monorepo, so they stay
@@ -91,6 +100,9 @@ test("--toolkit-dir with a missing value is a hard, actionable error", () => {
     () => locateToolkit({ argv: ["--toolkit-dir", "--json"], env: {} }),
     /--toolkit-dir requires a path argument/
   );
+  for (const argv of [["--toolkit-dir"], ["--toolkit-dir", "--json"], ["--toolkit-dir", "-h"]]) {
+    assert.throws(() => stripToolkitDirArgs(argv), /--toolkit-dir requires a path argument/);
+  }
 });
 
 test("no source at all → actionable error naming AIOS_TOOLKIT_DIR", () => {
