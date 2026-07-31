@@ -3,6 +3,7 @@
 // severity → exit-code mapping (deterministic 1 dominates adversarial 2).
 
 import { test } from "node:test";
+import { stageSpecWorkspace } from "./fixture-workspace.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -17,7 +18,12 @@ import {
 } from "../scripts/spec-eval.mjs";
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
-const REPO = path.join(DIR, "..");
+// AIO-594 cut: these tests treat `repo` as a workspace (spec-readiness rubric +
+// delivery skill suite — core-owned content). A minimal fixture workspace is staged
+// from the toolkit at runtime; every test here skips (named reason) without one.
+const WS = stageSpecWorkspace();
+const SKIP = WS.skip || false;
+const REPO = WS.dir ?? path.join(DIR, "..");
 const FIXTURES = path.join(DIR, "fixtures", "spec-eval");
 const read = (f) => readFileSync(path.join(FIXTURES, f), "utf8");
 const STRONG = read("strong-spec.md"); // deterministically clean → the LLM layer is the gate
@@ -42,7 +48,7 @@ const blocker = (ruleId, why = "x") => ({
 });
 const ready = (score = 95) => ({ verdict: "SPEC_READY", score, findings: [] });
 
-test("parseAdversarial — well-formed JSON parses; blocker forces NOT_READY", () => {
+test("parseAdversarial — well-formed JSON parses; blocker forces NOT_READY", { skip: SKIP }, () => {
   const ok = parseAdversarial('{"verdict":"SPEC_READY","score":88,"findings":[]}');
   assert.equal(ok.verdict, "SPEC_READY");
   assert.equal(ok.score, 88);
@@ -54,7 +60,7 @@ test("parseAdversarial — well-formed JSON parses; blocker forces NOT_READY", (
   assert.equal(forced.verdict, "NOT_READY");
 });
 
-test("junk output → one synthetic blocker, never throws", () => {
+test("junk output → one synthetic blocker, never throws", { skip: SKIP }, () => {
   for (const junk of ["not json", "", "{ broken", "[1,2,3]", '{"verdict":"MAYBE"}']) {
     const p = parseAdversarial(junk);
     assert.equal(p.parseError, true);
@@ -64,7 +70,7 @@ test("junk output → one synthetic blocker, never throws", () => {
   }
 });
 
-test("runAdversarialEval — aggregates findings from the evaluator", async () => {
+test("runAdversarialEval — aggregates findings from the evaluator", { skip: SKIP }, async () => {
   const res = await runAdversarialEval({
     specText: STRONG,
     rubric: RUBRIC,
@@ -80,7 +86,7 @@ test("runAdversarialEval — aggregates findings from the evaluator", async () =
   assert.equal(res.findings[0].layer, "adversarial");
 });
 
-test("runAdversarialEval — drops findings that duplicate a deterministic blocker", async () => {
+test("runAdversarialEval — drops findings that duplicate a deterministic blocker", { skip: SKIP }, async () => {
   const res = await runAdversarialEval({
     specText: STRONG,
     rubric: RUBRIC,
@@ -99,7 +105,7 @@ test("runAdversarialEval — drops findings that duplicate a deterministic block
   assert.ok(ids.includes("SR15"));
 });
 
-test("runAdversarialEval — evalFn throwing yields a synthetic blocker (fail closed)", async () => {
+test("runAdversarialEval — evalFn throwing yields a synthetic blocker (fail closed)", { skip: SKIP }, async () => {
   const res = await runAdversarialEval({
     specText: STRONG,
     rubric: RUBRIC,
@@ -112,7 +118,7 @@ test("runAdversarialEval — evalFn throwing yields a synthetic blocker (fail cl
   assert.equal(res.findings[0].severity, "blocker");
 });
 
-test("severity → exit mapping — adversarial blocker on a clean spec is exit 2", async () => {
+test("severity → exit mapping — adversarial blocker on a clean spec is exit 2", { skip: SKIP }, async () => {
   const res = await evaluateSpec({
     specText: STRONG,
     repo: REPO,
@@ -128,7 +134,7 @@ test("severity → exit mapping — adversarial blocker on a clean spec is exit 
   assert.equal(res.exitCode, 2);
 });
 
-test("severity → exit mapping — deterministic must-fail (1) dominates adversarial READY", async () => {
+test("severity → exit mapping — deterministic must-fail (1) dominates adversarial READY", { skip: SKIP }, async () => {
   const res = await evaluateSpec({
     specText: read("weak-no-deps.md"), // SR4 deterministic blocker
     repo: REPO,
@@ -140,7 +146,7 @@ test("severity → exit mapping — deterministic must-fail (1) dominates advers
   assert.equal(res.exitCode, 1);
 });
 
-test("clean spec + adversarial READY → SPEC_READY exit 0", async () => {
+test("clean spec + adversarial READY → SPEC_READY exit 0", { skip: SKIP }, async () => {
   const res = await evaluateSpec({
     specText: STRONG,
     repo: REPO,
@@ -154,7 +160,7 @@ test("clean spec + adversarial READY → SPEC_READY exit 0", async () => {
 
 // ── quorum ──────────────────────────────────────────────────────────────────────────────────
 
-test("normalizeQuorum — coerces to an odd integer ≥ 1; ≤1 disables", () => {
+test("normalizeQuorum — coerces to an odd integer ≥ 1; ≤1 disables", { skip: SKIP }, () => {
   assert.equal(normalizeQuorum(3), 3);
   assert.equal(normalizeQuorum(4), 5); // even rounds up so a strict majority exists
   assert.equal(normalizeQuorum(1), 1);
@@ -162,7 +168,7 @@ test("normalizeQuorum — coerces to an odd integer ≥ 1; ≤1 disables", () =>
   assert.equal(normalizeQuorum(undefined), 3); // DEFAULT_QUORUM
 });
 
-test("aggregateQuorum — a lone blocker is outvoted and demoted; median score", () => {
+test("aggregateQuorum — a lone blocker is outvoted and demoted; median score", { skip: SKIP }, () => {
   const agg = aggregateQuorum([blocker("SR15", "one unlucky roll"), ready(100), ready(90)]);
   assert.equal(agg.verdict, "SPEC_READY", "1/3 NOT_READY is below the majority");
   const sr15 = agg.findings.find((f) => f.ruleId === "SR15");
@@ -170,7 +176,7 @@ test("aggregateQuorum — a lone blocker is outvoted and demoted; median score",
   assert.equal(agg.score, 90, "median of [20,90,100]");
 });
 
-test("aggregateQuorum — a recurring blocker survives the vote and stays gating", () => {
+test("aggregateQuorum — a recurring blocker survives the vote and stays gating", { skip: SKIP }, () => {
   const agg = aggregateQuorum([blocker("SR8", "x"), blocker("SR8", "xy longer"), ready(80)]);
   assert.equal(agg.verdict, "NOT_READY", "2/3 NOT_READY meets the majority");
   const sr8 = agg.findings.find((f) => f.ruleId === "SR8");
@@ -178,14 +184,14 @@ test("aggregateQuorum — a recurring blocker survives the vote and stays gating
   assert.equal(sr8.why, "xy longer", "keeps the richest instance");
 });
 
-test("quorum — confirm-before-fail: a first READY sample costs exactly one call", async () => {
+test("quorum — confirm-before-fail: a first READY sample costs exactly one call", { skip: SKIP }, async () => {
   const evalFn = seqStub([ready(), blocker("SR8")]); // would flip on a 2nd call, but must not run one
   const res = await evaluateSpec({ specText: STRONG, repo: REPO, rubric: RUBRIC, evalFn });
   assert.equal(res.verdict, "SPEC_READY");
   assert.equal(evalFn.calls(), 1, "ready path does not escalate");
 });
 
-test("quorum — a lone NOT_READY roll is outvoted (stochastic flip absorbed)", async () => {
+test("quorum — a lone NOT_READY roll is outvoted (stochastic flip absorbed)", { skip: SKIP }, async () => {
   // First sample blocks → escalate to 3; the other two pass → majority SPEC_READY.
   const evalFn = seqStub([blocker("SR15"), ready(), ready()]);
   const res = await evaluateSpec({ specText: STRONG, repo: REPO, rubric: RUBRIC, evalFn });
@@ -194,7 +200,7 @@ test("quorum — a lone NOT_READY roll is outvoted (stochastic flip absorbed)", 
   assert.equal(evalFn.calls(), 3, "escalated to the full quorum");
 });
 
-test("quorum — a consistent blocker still blocks (real problems survive)", async () => {
+test("quorum — a consistent blocker still blocks (real problems survive)", { skip: SKIP }, async () => {
   const res = await evaluateSpec({
     specText: STRONG,
     repo: REPO,
@@ -205,7 +211,7 @@ test("quorum — a consistent blocker still blocks (real problems survive)", asy
   assert.equal(res.exitCode, 2);
 });
 
-test("quorum — K=1 disables quorum (single pass, no escalation)", async () => {
+test("quorum — K=1 disables quorum (single pass, no escalation)", { skip: SKIP }, async () => {
   const evalFn = seqStub([blocker("SR15"), ready(), ready()]);
   const res = await evaluateSpec({
     specText: STRONG,
@@ -218,7 +224,7 @@ test("quorum — K=1 disables quorum (single pass, no escalation)", async () => 
   assert.equal(evalFn.calls(), 1);
 });
 
-test("quorum — majority parseError fails closed; a minority is tolerated", async () => {
+test("quorum — majority parseError fails closed; a minority is tolerated", { skip: SKIP }, async () => {
   // All junk → every sample is a synthetic NOT_READY → stays blocked.
   const allJunk = await evaluateSpec({
     specText: STRONG,
@@ -234,7 +240,7 @@ test("quorum — majority parseError fails closed; a minority is tolerated", asy
   assert.equal(res.verdict, "SPEC_READY");
 });
 
-test("evaluator sampling is pinned (temperature 0) for reproducibility", () => {
+test("evaluator sampling is pinned (temperature 0) for reproducibility", { skip: SKIP }, () => {
   assert.equal(EVAL_SAMPLING.temperature, 0);
   assert.equal(EVAL_SAMPLING.top_p, 1);
 });
@@ -252,7 +258,7 @@ const passRecord = (ruleId) => ({
   why: `The contract for ${ruleId} is declared before implementation steps.`,
 });
 
-test("AIO-573 — a NOT_READY sample citing no blocker does not gate", () => {
+test("AIO-573 — a NOT_READY sample citing no blocker does not gate", { skip: SKIP }, () => {
   const p = parseAdversarial(
     JSON.stringify({ verdict: "NOT_READY", score: 30, findings: [passRecord("SR9")] })
   );
@@ -264,7 +270,7 @@ test("AIO-573 — a NOT_READY sample citing no blocker does not gate", () => {
   );
 });
 
-test("AIO-573 — a cited blocker still fails closed, unchanged", () => {
+test("AIO-573 — a cited blocker still fails closed, unchanged", { skip: SKIP }, () => {
   const p = parseAdversarial(
     JSON.stringify({
       verdict: "NOT_READY",
@@ -276,7 +282,7 @@ test("AIO-573 — a cited blocker still fails closed, unchanged", () => {
   assert.ok(!p.uncitedRefusal);
 });
 
-test("AIO-573 — an unrecognised severity parses to minor, not major", () => {
+test("AIO-573 — an unrecognised severity parses to minor, not major", { skip: SKIP }, () => {
   // Unlabeled records are usually pass notes; `major` overstated them and tanked the score.
   const p = parseAdversarial(
     JSON.stringify({ verdict: "SPEC_READY", score: 90, findings: [{ ruleId: "SR2", why: "ok" }] })
@@ -284,7 +290,7 @@ test("AIO-573 — an unrecognised severity parses to minor, not major", () => {
   assert.equal(p.findings[0].severity, "minor");
 });
 
-test("AIO-573 — recognised severity casing is normalized before gating", () => {
+test("AIO-573 — recognised severity casing is normalized before gating", { skip: SKIP }, () => {
   const p = parseAdversarial(
     JSON.stringify({
       verdict: "NOT_READY",
@@ -296,7 +302,7 @@ test("AIO-573 — recognised severity casing is normalized before gating", () =>
   assert.equal(p.findings[0].severity, "blocker");
 });
 
-test("AIO-573 — quorum: majority NOT_READY with no surviving blocker resolves to ready", () => {
+test("AIO-573 — quorum: majority NOT_READY with no surviving blocker resolves to ready", { skip: SKIP }, () => {
   // The distinct case parseAdversarial cannot catch: two samples each cite a DIFFERENT blocker,
   // so both are demoted for non-recurrence and the verdict would cite nothing.
   const agg = aggregateQuorum([
@@ -317,13 +323,13 @@ test("AIO-573 — quorum: majority NOT_READY with no surviving blocker resolves 
   assert.ok(agg.findings.every((f) => f.severity !== "blocker"));
 });
 
-test("AIO-573 — quorum: a recurring blocker is untouched by the new rule", () => {
+test("AIO-573 — quorum: a recurring blocker is untouched by the new rule", { skip: SKIP }, () => {
   const agg = aggregateQuorum([blocker("SR8", "x"), blocker("SR8", "xy longer"), ready(80)]);
   assert.equal(agg.verdict, "NOT_READY");
   assert.ok(!agg.uncitedRefusal);
 });
 
-test("AIO-573 — junk output still fails closed (synthetic blockers are cited)", () => {
+test("AIO-573 — junk output still fails closed (synthetic blockers are cited)", { skip: SKIP }, () => {
   for (const junk of ["not json", "", "{ broken", '{"verdict":"MAYBE"}']) {
     const p = parseAdversarial(junk);
     assert.equal(p.verdict, "NOT_READY", `${JSON.stringify(junk)} must stay blocked`);

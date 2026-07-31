@@ -1,4 +1,5 @@
 import test from "node:test";
+import { stageSpecWorkspace } from "./fixture-workspace.mjs";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,7 +9,12 @@ import { publishSpec, SpecPublishError } from "../scripts/spec-publish.mjs";
 import { skillSha256 } from "../scripts/skill-context.mjs";
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
-const REPO = path.join(DIR, "..");
+// AIO-594 cut: these tests treat `repo` as a workspace (spec-readiness rubric +
+// delivery skill suite — core-owned content). A minimal fixture workspace is staged
+// from the toolkit at runtime; every test here skips (named reason) without one.
+const WS = stageSpecWorkspace();
+const SKIP = WS.skip || false;
+const REPO = WS.dir ?? path.join(DIR, "..");
 const REPO_SHA = "1".repeat(40);
 
 function fixture({ verdict = "SPEC_READY", candidate = "# Ready\n", remote = "# Old\n" } = {}) {
@@ -58,7 +64,7 @@ function fixture({ verdict = "SPEC_READY", candidate = "# Ready\n", remote = "# 
   return { root, args, linear, writes: () => writes, setRemote: (value) => (description = value) };
 }
 
-test("publish refuses without explicit single-editor coordination", async () => {
+test("publish refuses without explicit single-editor coordination", { skip: SKIP }, async () => {
   const fx = fixture();
   let reads = 0;
   fx.args.exclusiveEditConfirmed = false;
@@ -75,7 +81,7 @@ test("publish refuses without explicit single-editor coordination", async () => 
   }
 });
 
-test("successful publish writes once, fetches again, and byte-verifies the remote", async () => {
+test("successful publish writes once, fetches again, and byte-verifies the remote", { skip: SKIP }, async () => {
   const fx = fixture();
   try {
     const result = await publishSpec(fx.args);
@@ -95,7 +101,7 @@ test("successful publish writes once, fetches again, and byte-verifies the remot
   }
 });
 
-test("NOT_READY artifact refuses before any remote read or write", async () => {
+test("NOT_READY artifact refuses before any remote read or write", { skip: SKIP }, async () => {
   const fx = fixture({ verdict: "NOT_READY" });
   let reads = 0;
   fx.args.linear.getIssue = async () => {
@@ -111,7 +117,7 @@ test("NOT_READY artifact refuses before any remote read or write", async () => {
   }
 });
 
-test("a deterministic-only artifact cannot be published (AIO-573)", async () => {
+test("a deterministic-only artifact cannot be published (AIO-573)", { skip: SKIP }, async () => {
   // Publishing writes the spec into the Linear issue description, making it the build contract.
   // Before the adversarial layer became opt-in, a deterministic-only run exited 3 and could never
   // reach SPEC_READY, so this guarantee was structural. Now it has to be checked.
@@ -132,7 +138,7 @@ test("a deterministic-only artifact cannot be published (AIO-573)", async () => 
   }
 });
 
-test("a normal readiness artifact cannot be reused for external publishing", async () => {
+test("a normal readiness artifact cannot be reused for external publishing", { skip: SKIP }, async () => {
   const fx = fixture();
   const evaluation = JSON.parse(readFileSync(fx.args.evalArtifactPath, "utf8"));
   writeFileSync(fx.args.evalArtifactPath, JSON.stringify({ ...evaluation, publishable: false }));
@@ -150,7 +156,7 @@ test("a normal readiness artifact cannot be reused for external publishing", asy
   }
 });
 
-test("stale pre-write remote hash refuses without mutation", async () => {
+test("stale pre-write remote hash refuses without mutation", { skip: SKIP }, async () => {
   const fx = fixture();
   fx.setRemote("# Concurrent edit\n");
   try {
@@ -161,7 +167,7 @@ test("stale pre-write remote hash refuses without mutation", async () => {
   }
 });
 
-test("a remote edit during audit preparation is rechecked immediately before mutation", async () => {
+test("a remote edit during audit preparation is rechecked immediately before mutation", { skip: SKIP }, async () => {
   const fx = fixture();
   let reads = 0;
   fx.args.linear.getIssue = async () => {
@@ -176,7 +182,7 @@ test("a remote edit during audit preparation is rechecked immediately before mut
   }
 });
 
-test("candidate confidentiality findings refuse before contacting Linear", async () => {
+test("candidate confidentiality findings refuse before contacting Linear", { skip: SKIP }, async () => {
   const fx = fixture();
   let reads = 0;
   const withheldPayload = "do-not-echo-this-finding-payload";
@@ -204,7 +210,7 @@ test("candidate confidentiality findings refuse before contacting Linear", async
   }
 });
 
-test("candidate hash mismatch refuses before contacting Linear", async () => {
+test("candidate hash mismatch refuses before contacting Linear", { skip: SKIP }, async () => {
   const fx = fixture();
   writeFileSync(fx.args.candidatePath, "# Changed\n");
   let reads = 0;
@@ -220,7 +226,7 @@ test("candidate hash mismatch refuses before contacting Linear", async () => {
   }
 });
 
-test("ambiguous mutation response is never retried and preserves the backup", async () => {
+test("ambiguous mutation response is never retried and preserves the backup", { skip: SKIP }, async () => {
   const fx = fixture();
   fx.args.linear.updateIssueDescription = async () => {
     throw new Error("connection dropped");
@@ -241,7 +247,7 @@ test("ambiguous mutation response is never retried and preserves the backup", as
   }
 });
 
-test("post-write byte mismatch fails closed without a second write", async () => {
+test("post-write byte mismatch fails closed without a second write", { skip: SKIP }, async () => {
   const fx = fixture();
   let attempts = 0;
   fx.args.linear.updateIssueDescription = async () => {
@@ -259,7 +265,7 @@ test("post-write byte mismatch fails closed without a second write", async () =>
   }
 });
 
-test("dry-run performs no mutation and creates no audit bundle", async () => {
+test("dry-run performs no mutation and creates no audit bundle", { skip: SKIP }, async () => {
   const fx = fixture();
   try {
     const result = await publishSpec({ ...fx.args, dryRun: true });

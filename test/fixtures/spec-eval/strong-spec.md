@@ -21,8 +21,8 @@ that rubric instead of the default `.claude/rubrics/spec-readiness.md`.
 ## Integration points
 
 - `scripts/spec-eval.mjs` — `cmdSpec` already resolves `flag("--rubric") ?? default`; verify it.
-- `scripts/relay.mjs` — the `--spec` gate hard-codes the default rubric path; leave it unchanged.
-- `.claude/rubrics/spec-readiness.md` — the default rubric, unchanged.
+- `scripts/spec-checks/rubric.mjs` — `resolveRubricPath` keeps its explicit-first precedence; leave it unchanged.
+- `scripts/spec-publish.mjs` — publishes an evaluated spec; not affected by the flag; leave it unchanged.
 
 ## Deps
 

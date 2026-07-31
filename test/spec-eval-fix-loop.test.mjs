@@ -3,6 +3,7 @@
 // spent budget (deterministic 1 vs adversarial 2).
 
 import { test } from "node:test";
+import { stageSpecWorkspace } from "./fixture-workspace.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -10,7 +11,12 @@ import { fileURLToPath } from "node:url";
 import { runFixLoop } from "../scripts/spec-eval.mjs";
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
-const REPO = path.join(DIR, "..");
+// AIO-594 cut: these tests treat `repo` as a workspace (spec-readiness rubric +
+// delivery skill suite — core-owned content). A minimal fixture workspace is staged
+// from the toolkit at runtime; every test here skips (named reason) without one.
+const WS = stageSpecWorkspace();
+const SKIP = WS.skip || false;
+const REPO = WS.dir ?? path.join(DIR, "..");
 const FIXTURES = path.join(DIR, "fixtures", "spec-eval");
 const read = (f) => readFileSync(path.join(FIXTURES, f), "utf8");
 const STRONG = read("strong-spec.md"); // deterministically clean → the LLM verdict is the gate
@@ -23,7 +29,7 @@ const NOT_READY = JSON.stringify({
 });
 const READY = JSON.stringify({ verdict: "SPEC_READY", score: 90, findings: [] });
 
-test("converges within budget (fail-then-pass) → exit 0, 1 iteration", async () => {
+test("converges within budget (fail-then-pass) → exit 0, 1 iteration", { skip: SKIP }, async () => {
   let evalCalls = 0;
   let reviseCalls = 0;
   const evalFn = () => {
@@ -51,7 +57,7 @@ test("converges within budget (fail-then-pass) → exit 0, 1 iteration", async (
   assert.equal(loop.after.verdict, "SPEC_READY");
 });
 
-test("resolution map reports each finding from the post-revision evaluation", async () => {
+test("resolution map reports each finding from the post-revision evaluation", { skip: SKIP }, async () => {
   let evalCalls = 0;
   const findingA = { ruleId: "A", severity: "blocker", why: "first" };
   const findingB = { ruleId: "B", severity: "blocker", why: "second" };
@@ -80,7 +86,7 @@ test("resolution map reports each finding from the post-revision evaluation", as
   );
 });
 
-test("exhaustion (always NOT_READY) → status exhausted, exit 2, iterations == budget", async () => {
+test("exhaustion (always NOT_READY) → status exhausted, exit 2, iterations == budget", { skip: SKIP }, async () => {
   let reviseCalls = 0;
   const loop = await runFixLoop({
     specText: STRONG,
@@ -100,7 +106,7 @@ test("exhaustion (always NOT_READY) → status exhausted, exit 2, iterations == 
   assert.equal(reviseCalls, 2);
 });
 
-test("budget defaults to the rubric budget when not passed", async () => {
+test("budget defaults to the rubric budget when not passed", { skip: SKIP }, async () => {
   let reviseCalls = 0;
   const loop = await runFixLoop({
     specText: STRONG,
@@ -118,7 +124,7 @@ test("budget defaults to the rubric budget when not passed", async () => {
   assert.equal(reviseCalls, 3);
 });
 
-test("a deterministic must-fail the reviser cannot fix → exhausted with exit 1", async () => {
+test("a deterministic must-fail the reviser cannot fix → exhausted with exit 1", { skip: SKIP }, async () => {
   const WEAK = read("weak-no-deps.md"); // SR4 deterministic blocker, unfixable by an identity reviser
   const loop = await runFixLoop({
     specText: WEAK,
@@ -133,7 +139,7 @@ test("a deterministic must-fail the reviser cannot fix → exhausted with exit 1
   assert.equal(loop.exitCode, 1); // deterministic must-fail dominates
 });
 
-test("a reviser that clears the deterministic blocker converges (offline, --no-llm)", async () => {
+test("a reviser that clears the deterministic blocker converges (offline, --no-llm)", { skip: SKIP }, async () => {
   const loop = await runFixLoop({
     specText: read("weak-no-deps.md"),
     repo: REPO,
@@ -149,7 +155,7 @@ test("a reviser that clears the deterministic blocker converges (offline, --no-l
   assert.equal(loop.after.verdict, "NOT_EVALUATED"); // clean deterministic, no LLM
 });
 
-test("reviewed-parent provenance uses LLM only before and after deterministic revisions", async () => {
+test("reviewed-parent provenance uses LLM only before and after deterministic revisions", { skip: SKIP }, async () => {
   let evalCalls = 0;
   let reviseCalls = 0;
   const loop = await runFixLoop({

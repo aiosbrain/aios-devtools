@@ -65,11 +65,10 @@ test("--toolkit-dir flag wins over env", () => {
   }
 });
 
-test("containing repo root is the in-monorepo fallback (this repo IS a toolkit)", () => {
-  const r = locateToolkit({ argv: [], env: {} });
-  assert.equal(r.source, "containing-repo");
-  assert.equal(r.dir, realpathSync(repoRoot));
-});
+// SPLIT (AIO-594 cut): the "containing repo root is the in-monorepo fallback" and
+// "loadToolkitModule loads the same core module instance as a static import" subtests
+// assert that the CONTAINING repo is a toolkit — true only in-monorepo, so they stay
+// in aios-workspace core with core's copy (untouched core content).
 
 test("explicit env pointing at a non-toolkit is a hard error, never a silent fallback", () => {
   const notToolkit = mkdtempSync(path.join(tmpdir(), "aios-not-toolkit-"));
@@ -104,13 +103,4 @@ test("no source at all → actionable error naming AIOS_TOOLKIT_DIR", () => {
   } finally {
     rmSync(notToolkit, { recursive: true, force: true });
   }
-});
-
-test("loadToolkitModule loads the same core module instance as a static import", async () => {
-  const viaSeam = await loadToolkitModule("severity.mjs");
-  const viaStatic = await import("../scripts/severity.mjs");
-  assert.equal(typeof viaSeam.hasCriticalOrHighFindings, "function");
-  // Same resolved URL → same ESM cache entry → identical module namespace.
-  assert.equal(viaSeam.SEVERITY_RANK, viaStatic.SEVERITY_RANK);
-  assert.equal(viaSeam.hasFindingsAtOrAbove, viaStatic.hasFindingsAtOrAbove);
 });

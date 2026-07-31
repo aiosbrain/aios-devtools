@@ -23,6 +23,18 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runBuild, slugify, EXIT } from "../scripts/build.mjs";
+import { toolkitDir, toolkitSkip } from "./fixture-workspace.mjs";
+
+// AIO-594 cut: the staged repo must be workspace-shaped (scripts/leak-gate.sh +
+// the validation/ gate tree — core-owned; the build secrets gate fails closed
+// without validation/validate-all.sh). Sourced from the toolkit at runtime;
+// this whole file skips (named reason) without one.
+const TOOLKIT = toolkitDir();
+if (!TOOLKIT) {
+  console.log(`SKIP test/build-loop.test.mjs: ${toolkitSkip("workspace gate tree (leak-gate.sh + validation/)")}`);
+  process.exit(0);
+}
+
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.join(DIR, "..");
@@ -57,8 +69,8 @@ function freshRepo({ withGate = true } = {}) {
   if (withGate) {
     // give the build phase the real secrets gate to run
     mkdirSync(path.join(repo, "scripts"), { recursive: true });
-    cpSync(path.join(REPO, "scripts", "leak-gate.sh"), path.join(repo, "scripts", "leak-gate.sh"));
-    cpSync(path.join(REPO, "validation"), path.join(repo, "validation"), { recursive: true });
+    cpSync(path.join(TOOLKIT, "scripts", "leak-gate.sh"), path.join(repo, "scripts", "leak-gate.sh"));
+    cpSync(path.join(TOOLKIT, "validation"), path.join(repo, "validation"), { recursive: true });
   }
   writeFileSync(path.join(repo, "README.md"), "# base\n");
   // Pin code_review to a Cursor-family model so this suite keeps hitting the PATH-shimmed

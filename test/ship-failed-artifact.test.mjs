@@ -9,6 +9,17 @@ import { runShip, SHIP_EXIT, DEFAULT_PLAN_TIMEOUT_MS, failedArtifact } from "../
 import { resolveLoopModels } from "../scripts/loop-models.mjs";
 import { EXIT as BUILD_EXIT } from "../scripts/build.mjs";
 import { stubSpecRubric } from "./ship-test-helpers.mjs";
+import { toolkitDir, toolkitSkip } from "./fixture-workspace.mjs";
+
+// AIO-594 cut: this suite drives runShip through seam-dependent stages (the
+// stays-core review engine loads via toolkit-locate). Without a toolkit it fails
+// with the contract's actionable locator error by design — skip with the named
+// reason instead (docs/devtools-toolkit-contract.md).
+if (!toolkitDir()) {
+  console.log(`SKIP test/ship-failed-artifact.test.mjs: ${toolkitSkip("toolkit-seam review engine")}`);
+  process.exit(0);
+}
+
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";

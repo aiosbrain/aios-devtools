@@ -18,6 +18,7 @@ import {
 import { resolveLoopModels } from "../scripts/loop-models.mjs";
 import { EXIT as BUILD_EXIT } from "../scripts/build.mjs";
 import { stubSpecRubric } from "./ship-test-helpers.mjs";
+import { toolkitFile, toolkitSkip, RUBRIC_REL } from "./fixture-workspace.mjs";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -27,8 +28,16 @@ const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SHIP_GATE_PLAN_MARKER = "SHIP_GATE plan pending";
 const SHIP_GATE_MERGE_MARKER = "SHIP_GATE merge pending";
 
+// AIO-594 cut: the spec-readiness rubric is core-owned — resolved from the toolkit at
+// runtime (skip-when-absent) instead of assuming this repo root vendors it.
+const RUBRIC_SRC = toolkitFile(RUBRIC_REL);
+if (!RUBRIC_SRC) {
+  console.log(`SKIP test/ship-resume.test.mjs: ${toolkitSkip("spec-readiness rubric")}`);
+  process.exit(0);
+}
+
 function seedRubric(repo) {
-  const rubricSrc = path.join(REPO_ROOT, ".claude", "rubrics", "spec-readiness.md");
+  const rubricSrc = RUBRIC_SRC;
   const rubricDst = path.join(repo, ".claude", "rubrics", "spec-readiness.md");
   mkdirSync(path.dirname(rubricDst), { recursive: true });
   writeFileSync(rubricDst, readFileSync(rubricSrc, "utf8"));

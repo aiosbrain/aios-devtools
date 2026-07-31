@@ -62,18 +62,10 @@ test("devtools files reach stays-core engines only through the toolkit seam", ()
   );
 });
 
-test("the seam file set matches check-boundaries' devtools set (drift guard)", () => {
-  const gate = readFileSync(path.join(repoRoot, "scripts", "check-boundaries.mjs"), "utf8");
-  // Scope to the DEVTOOLS_PATH_RE definition itself — a whole-file substring search could
-  // be satisfied by an unrelated comment while the regex omits a file (CodeRabbit, #511).
-  const def = gate.match(/const DEVTOOLS_PATH_RE\s*=\s*([\s\S]*?);/);
-  assert.ok(def, "DEVTOOLS_PATH_RE definition missing from check-boundaries.mjs");
-  // Every non-ship/ member must appear in DEVTOOLS_PATH_RE; ship/ is covered by `ship\/`.
-  for (const rel of DEVTOOLS_FILES.filter((f) => !f.startsWith("scripts/ship/"))) {
-    const base = rel.replace("scripts/", "").replace(".mjs", "");
-    assert.ok(def[1].includes(base), `${rel} missing from check-boundaries DEVTOOLS_PATH_RE`);
-  }
-});
+// SPLIT (AIO-594 cut): the "seam file set matches check-boundaries' devtools set" drift
+// guard reads core's scripts/check-boundaries.mjs + boundaries.json, so that subtest
+// stays in aios-workspace core (untouched core content); this devtools copy keeps the
+// no-static-import invariant + the lazy-Bugbot-resolution guard.
 
 test("build resolves the review engine only on a Bugbot-enabled path", () => {
   const build = readFileSync(path.join(repoRoot, "scripts", "build.mjs"), "utf8");
