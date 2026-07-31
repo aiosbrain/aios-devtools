@@ -26,9 +26,26 @@ jobs:
         run: node scripts/check-file-size.mjs
       - name: Repo-boundary gate
         run: node scripts/check-boundaries.mjs
+      - name: Assert leak-gate term secret present (fail closed)
+        # Known limitation: fork PRs never receive repo secrets, so they can only run the
+        # baseline shape rules — the assertion is scoped to push + same-repo PRs to avoid
+        # breaking forks. For those trusted events a missing/empty AIOS_LEAK_TERMS_B64 must
+        # FAIL, not silently degrade to baseline-only: a repo-settings regression must never
+        # appear green. (Pattern proven in aiosbrain/aios-workspace-gui.)
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          # Boolean only — the secret value itself is never exported or echoed by this step.
+          HAS_LEAK_TERMS: ${{ secrets.AIOS_LEAK_TERMS_B64 != '' }}
+        run: |
+          if [ "$HAS_LEAK_TERMS" != "true" ]; then
+            echo "::error::AIOS_LEAK_TERMS_B64 repo secret is missing or empty — the confidential-identifier sweep cannot run, and a baseline-only pass must not look green on trusted events. Reinstall the secret (Settings > Secrets and variables > Actions) from the sanctioned local term file."
+            exit 1
+          fi
+          echo "leak-gate term secret present — the identifier sweep will run."
       - name: Confidentiality leak gate
         # Terms come from the AIOS_LEAK_TERMS_B64 secret (never stored in the repo).
-        # Without the secret the gate enforces its always-on baseline shape rules.
+        # Fork PRs (no secrets) fall back to the gate's always-on baseline shape rules;
+        # push + same-repo PRs are guaranteed the full sweep by the assertion above.
         env:
           AIOS_LEAK_TERMS_B64: ${{ secrets.AIOS_LEAK_TERMS_B64 }}
         run: bash scripts/leak-gate.sh .
@@ -53,12 +70,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Toolkit-dependent suites resolve core-owned content (spec rubric, delivery skill
+      # suite, validation/ gate tree) and the stays-core seam engines through a real AIOS
+      # toolkit checkout (docs/devtools-toolkit-contract.md): without AIOS_TOOLKIT_DIR
+      # they skip with a named reason by design — this checkout makes them run.
+      - name: Checkout AIOS toolkit
+        uses: actions/checkout@v7
+        with:
+          repository: aiosbrain/aios-workspace
+          # AIO-594 cut baseline — repin to the release tag once the devtools cut ships
+          ref: 10099cd8b01bade40fd16f296fa523ef20b228c3
+          path: toolkit-checkout
       - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Install dependencies
         run: |
           if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+      - name: Provision toolkit (deps + operator-loop dist)
+        working-directory: toolkit-checkout
+        run: |
+          npm ci
+          # compiled operator loop dist — the spec-eval advisory path loads it via the seam
+          npm run build:loop --if-present
       - name: Test
+        env:
+          AIOS_TOOLKIT_DIR: ${{ github.workspace }}/toolkit-checkout
         run: |
           if [ -f package.json ]; then npm run test --if-present; else echo "no package.json — skipping tests"; fi

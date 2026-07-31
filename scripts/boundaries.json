@@ -32,5 +32,12 @@
       "to": "test/**"
     }
   ],
-  "grandfathered": []
+  "grandfathered": [
+    {
+      "from": "scripts/cli-common.mjs",
+      "to": "scripts/ui/output-context.mjs",
+      "reason": "R1: scripts/ui/ has no top-level barrel (scripts/ui.mjs) yet. Carried from aios-workspace scripts/boundaries.json @ 10099cd8 (the only core grandfather entry whose from+to both travelled in the AIO-594 cut).",
+      "issue": "AIO-597"
+    }
+  ]
 }
