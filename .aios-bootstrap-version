@@ -1,0 +1,34 @@
+{
+  "bootstrapVersion": "0.1.0",
+  "toolkitSha": "10099cd8b01bade40fd16f296fa523ef20b228c3",
+  "toolkitSemver": "0.8.0",
+  "stampedAt": "2026-07-31T14:00:11.143Z",
+  "params": {
+    "REPO_NAME": "mirror-wt",
+    "LINT_SCRIPT": "lint",
+    "TEST_SCRIPT": "test",
+    "BOOTSTRAP_VERSION": "0.1.0"
+  },
+  "files": {
+    ".harness/hooks/git/pre-commit-primary-guard": "sha256:625622f17d097548bbe15ca155e69493ff8e56221c806db464514ccbdef2cc34",
+    ".harness/hooks/git/reference-transaction-strand-guard": "sha256:f45bb2f0ef52c7825a02b6dac4f470f019f2ea529c9a7ecb62d011dbd99630db",
+    ".harness/hooks/git/install-primary-commit-guard.sh": "sha256:039bed3cd744c268da6c3fa53d589bce7b8dfcde90e2253772120fe9791dcadc",
+    ".harness/hooks/guard-worktree.sh": "sha256:fb4877795be99ef853797aff78303ed5f6427fd697993a834ac278d368d5a691",
+    ".harness/hooks/prepare-event.sh": "sha256:21716a1d4d942e622c306fcdb70da7094604c5c193b51a678f4795677437e3b9",
+    ".harness/hooks/validate-event.sh": "sha256:5fc8e9d16caf5b152a0e8af1a0d4a612daa8c6eee6b2c9707fba36503a157ba1",
+    ".harness/hooks/validate-action.sh": "sha256:80bfb0bb08e0a89e72c5a2d256f71b9b8ab058df1efb09af85fd9b498cded723",
+    ".harness/hooks/trace-event.sh": "sha256:c4328ba49a3cdf132c6966f8bf6ca79f8753f0e59ce8e0d246b082f150e81295",
+    ".harness/adapters/run-hook.sh": "sha256:b98adc2e4ea0398bedb4f94f3eb36fcd988eb06673ce83ab425aa680e2c9e24e",
+    ".harness/adapters/claude-code/normalize.sh": "sha256:a7ed90badc37e33ab4b989a20db803eaad4f76a5f3f15194d35ad9c9656cf332",
+    ".harness/adapters/claude-code/run-strict-guard.sh": "sha256:33496f8aec687011a5afc9b935400042b70fe0f7e990f10ebb413d92bf7613dc",
+    "scripts/check-file-size.mjs": "sha256:55edba68132e793a0658bfc3a6f074fd22ee4126d6058d02b172491e7a2035a8",
+    "scripts/check-boundaries.mjs": "sha256:331a217826c12ac6c56191ee04096c848029bfb12f71d5337ff9304614a89645",
+    "scripts/git-files.mjs": "sha256:3f5b01dbfd739ede019c652c5f573525581c4efc378a43527c51091b951d18c8",
+    "validation/agent-readiness-lib.mjs": "sha256:306829fe7a24f60c69e980a1def44050159ac951ef82dce20f55a97557cdf95d",
+    "scripts/leak-gate.sh": "sha256:172be43bef54acd6b175b2e06b35e62abaf6712eaf88b571e698ad0e013cbee5",
+    "hooks/git/pre-push-leak-gate": "sha256:c744451319fb2309476d6a65d05a4476a98f48cd15df54179c951b7ee057f779",
+    "scripts/install-leak-gate-push-hook.sh": "sha256:8ddd233ce6dbc9264bcbcc544033268c794ae272797e8c800446ef01f1384899",
+    "scripts/link-worktree-env.sh": "sha256:269b35761a96dd7766a9e9e8c5a2027b31c9ed9625f4fa6191d474d10d97a539",
+    ".harness/hooks/git/post-checkout": "sha256:1b2fb2a9d754d155878c88733d095b8c3e925f504fb00df24d5a09f5dbfc7883"
+  }
+}
