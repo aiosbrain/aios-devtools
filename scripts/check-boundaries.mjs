@@ -235,9 +235,13 @@ function matchRule(fromRel, toRel) {
   return null;
 }
 
-// The devtools path set (AIO-594): the exact files moving to the aiosbrain/aios-devtools repo.
+// The devtools path set (AIO-594): the exact files moving to the aiosbrain/aios-devtools repo,
+// plus the package's own devtools-born entry points added in this repo (AIO-594 PR A):
+// scripts/cli.mjs (the `aios-devtools` bin) and scripts/index.mjs (the package-root export) —
+// they ARE devtools files (they exist only to dispatch/re-export the command set), so they may
+// import it; every copied-core file remains barred from the set by R6 exactly as before.
 const DEVTOOLS_PATH_RE =
-  /^scripts\/(ship\.mjs$|ship\/|build\.mjs$|roadmap-run\.mjs$|spec-eval\.mjs$|spec-publish\.mjs$|consolidate-findings\.mjs$)/;
+  /^scripts\/(ship\.mjs$|ship\/|build\.mjs$|roadmap-run\.mjs$|spec-eval\.mjs$|spec-publish\.mjs$|consolidate-findings\.mjs$|cli\.mjs$|index\.mjs$)/;
 
 function buildGrandfatherKey(from, to) {
   return `${from} ${to}`;

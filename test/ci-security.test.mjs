@@ -20,7 +20,8 @@ test("all third-party Actions are immutable-SHA pinned and checkout drops creden
   assert.ok(uses.length > 0);
   for (const action of uses) assert.match(action, /@[0-9a-f]{40}$/);
   const checkouts = workflowSteps().filter((step) => /uses: actions\/checkout@/.test(step));
-  assert.equal(checkouts.length, 4);
+  // gates + lint + test (repo + pinned toolkit) + test-no-toolkit + pack-verify (AIO-594 PR A)
+  assert.equal(checkouts.length, 6);
   for (const step of checkouts) {
     assert.match(step, /^\s+(?:- )?uses: actions\/checkout@[0-9a-f]{40}/m);
     assert.match(step, /^          persist-credentials: false$/m);

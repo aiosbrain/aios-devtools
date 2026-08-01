@@ -19,6 +19,9 @@ const DEVTOOLS_FILES = [
   "scripts/spec-eval.mjs",
   "scripts/spec-publish.mjs",
   "scripts/consolidate-findings.mjs",
+  // Package entry points added in AIO-594 PR A — devtools-set members, same seam guarantee.
+  "scripts/cli.mjs",
+  "scripts/index.mjs",
   ...readdirSync(path.join(repoRoot, "scripts", "ship"))
     .filter((f) => f.endsWith(".mjs"))
     .map((f) => `scripts/ship/${f}`),
