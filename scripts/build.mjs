@@ -1462,8 +1462,8 @@ async function finish({
 }
 
 // ── CLI entry point ─────────────────────────────────────────────────────────────
-
 export async function cmdBuild(repo, args) {
+  args = stripToolkitDirArgs(args);
   if (!args.length || args[0] === "--help" || args[0] === "-h") {
     console.log(
       [
