@@ -17,24 +17,28 @@ jobs:
   gates:
     name: governance gates (size + boundaries + leak)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
       - name: File-size gate (default-deny, ratchet-only-down)
         run: node scripts/check-file-size.mjs
       - name: Repo-boundary gate
         run: node scripts/check-boundaries.mjs
-      - name: Assert leak-gate term secret present (fail closed)
-        # Known limitation: fork PRs never receive repo secrets, so they can only run the
-        # baseline shape rules — the assertion is scoped to push + same-repo PRs to avoid
-        # breaking forks. For those trusted events a missing/empty AIOS_LEAK_TERMS_B64 must
-        # FAIL, not silently degrade to baseline-only: a repo-settings regression must never
-        # appear green. (Pattern proven in aiosbrain/aios-workspace-gui.)
-        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+      - name: Baseline confidentiality leak gate
+        # PR-controlled code never receives the private term dictionary. The always-on shape
+        # rules still catch generic credentials and machine-specific paths on every event.
         env:
-          # Boolean only — the secret value itself is never exported or echoed by this step.
+          AIOS_LEAK_TERMS_B64: ""
+        run: bash scripts/leak-gate.sh .
+      - name: Assert private leak terms present on protected main (fail closed)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
           HAS_LEAK_TERMS: ${{ secrets.AIOS_LEAK_TERMS_B64 != '' }}
         run: |
           if [ "$HAS_LEAK_TERMS" != "true" ]; then
@@ -42,10 +46,8 @@ jobs:
             exit 1
           fi
           echo "leak-gate term secret present — the identifier sweep will run."
-      - name: Confidentiality leak gate
-        # Terms come from the AIOS_LEAK_TERMS_B64 secret (never stored in the repo).
-        # Fork PRs (no secrets) fall back to the gate's always-on baseline shape rules;
-        # push + same-repo PRs are guaranteed the full sweep by the assertion above.
+      - name: Private confidentiality term scan on protected main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           AIOS_LEAK_TERMS_B64: ${{ secrets.AIOS_LEAK_TERMS_B64 }}
         run: bash scripts/leak-gate.sh .
@@ -53,9 +55,13 @@ jobs:
   lint:
     name: lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
       - name: Install dependencies
@@ -68,20 +74,25 @@ jobs:
   test:
     name: unit tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # Toolkit-dependent suites resolve core-owned content (spec rubric, delivery skill
       # suite, validation/ gate tree) and the stays-core seam engines through a real AIOS
       # toolkit checkout (docs/devtools-toolkit-contract.md): without AIOS_TOOLKIT_DIR
       # they skip with a named reason by design — this checkout makes them run.
       - name: Checkout AIOS toolkit
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: aiosbrain/aios-workspace
           # AIO-594 cut baseline — repin to the release tag once the devtools cut ships
           ref: 10099cd8b01bade40fd16f296fa523ef20b228c3
           path: toolkit-checkout
-      - uses: actions/setup-node@v7
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
       - name: Install dependencies

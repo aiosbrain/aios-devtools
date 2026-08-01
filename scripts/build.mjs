@@ -51,13 +51,12 @@ import { callAgentModel, requirePromptModelKey, reviewCallForModel } from "./mod
 // The verdict matcher is a core-leaf import (severity.mjs); the review engine itself loads
 // via the toolkit seam at point-of-use (AIO-594 F1; docs/devtools-toolkit-contract.md).
 import { hasCriticalOrHighFindings } from "./severity.mjs";
-import { loadToolkitModule } from "./toolkit-locate.mjs";
+import { loadToolkitModule, stripToolkitDirArgs } from "./toolkit-locate.mjs";
 import { resolveLoopModels } from "./loop-models.mjs";
 import { parseModelRef } from "./model-providers.mjs";
 import { cmdPr } from "./pr.mjs";
 import { loadConstitutionDigest, constitutionPromptLines } from "@aiosbrain/foundation/constitution";
 import { loadSkillContext, parseDeclaredSkills } from "./skill-context.mjs";
-
 const DEFAULT_REVIEW_SKILL = "/ai-code-review";
 export const BASE_SHA_MARK = ".aios-build-base-sha";
 // Builder = Opus via Claude Code; reviewer = Cursor /ai-code-review. This mirrors the
@@ -116,6 +115,7 @@ export const EXIT = {
 // ── pure helpers (exported for tests) ─────────────────────────────────────────
 
 export function parseBuildArgs(args) {
+  args = stripToolkitDirArgs(args);
   const flag = (name) => {
     const i = args.indexOf(name);
     return i >= 0 ? args[i + 1] : null;
@@ -1462,8 +1462,8 @@ async function finish({
 }
 
 // ── CLI entry point ─────────────────────────────────────────────────────────────
-
 export async function cmdBuild(repo, args) {
+  args = stripToolkitDirArgs(args);
   if (!args.length || args[0] === "--help" || args[0] === "-h") {
     console.log(
       [

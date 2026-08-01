@@ -16,13 +16,12 @@
  *   AIOS_SPEC_EVAL_STUB — raw evaluator text (or a file path to it); bypasses the SDK call.
  *   AIOS_SPEC_FIX_STUB  — revised-spec text (or a file path to it); bypasses the SDK reviser.
  */
-
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { c } from "./relay-core.mjs";
-import { getToolkit, loadToolkitModule } from "./toolkit-locate.mjs";
+import { getToolkit, loadToolkitModule, stripToolkitDirArgs } from "./toolkit-locate.mjs";
 import { resolveLoopModels } from "./loop-models.mjs";
 import { callPromptModel, requirePromptModelKey } from "./model-call.mjs";
 import {
@@ -1069,6 +1068,7 @@ function specArgv(rest) {
 /** `aios spec eval|fix`. Emits the exact exit code via process.exit (0/1/2/3 verdict, 4 usage/IO).
  *  --json output always carries exitCode (and, for fix, the output path). */
 export async function cmdSpec(repo, args) {
+  args = stripToolkitDirArgs(args);
   if (!args.length || args[0] === "--help" || args[0] === "-h") {
     console.log(HELP);
     return;

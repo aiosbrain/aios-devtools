@@ -4,6 +4,7 @@ import path from "node:path";
 import { createLinearClient, resolveLinearApiKey } from "@aiosbrain/foundation/linear-client";
 import { defaultScanFile } from "./scan-file.mjs";
 import { loadSkillContext, skillSha256 } from "./skill-context.mjs";
+import { stripToolkitDirArgs } from "./toolkit-locate.mjs";
 
 const TRUSTED_GIT_BIN = ["/usr/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"].find(
   existsSync
@@ -206,6 +207,7 @@ export async function publishSpec({
 }
 
 export async function cmdSpecPublish(repo, args, deps = {}) {
+  args = stripToolkitDirArgs(args);
   const issueId = args[1];
   const candidate = args[2];
   const flag = (name) => {

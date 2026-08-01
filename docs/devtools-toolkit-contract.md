@@ -20,9 +20,10 @@ One implementation. Every core-staying module a devtools file loads resolves thr
 
 Resolution order (`locateToolkit()`):
 
-1. explicit `--toolkit-dir <path>` argv flag (or a `toolkitDir` param) — the devtools arg
-   parsers must learn to tolerate the flag at cut time; today the env var is the supported
-   standalone mechanism;
+1. explicit `--toolkit-dir <path>` argv flag (or a `toolkitDir` param). The shared
+   `stripToolkitDirArgs()` normalizer removes the selector before ship, build, spec,
+   spec-publish, roadmap-run, and consolidate-findings parse command-specific positions,
+   without mutating `process.argv`, which remains available to the locator;
 2. `AIOS_TOOLKIT_DIR` env var;
 3. the containing repo root (`scripts/..`), when it looks like a toolkit — pre-cut this is
    always true, so everything works unchanged in-monorepo;
@@ -67,8 +68,8 @@ the fix (`npm run build:loop` in the toolkit) and evaluates with an empty decisi
 
 ## Standalone requirements (post-cut)
 
-- A core `aios-workspace` checkout, pointed at via `AIOS_TOOLKIT_DIR` (or `--toolkit-dir` once
-  the arg parsers accept it). Without one, only the seam-loading paths fail — with the
+- A core `aios-workspace` checkout, pointed at via `AIOS_TOOLKIT_DIR` or `--toolkit-dir`.
+  Without one, only the seam-loading paths fail — with the
   actionable locator error, not `ERR_MODULE_NOT_FOUND`.
 - `@anthropic-ai/sdk` declared in the devtools `package.json` (bare import in
   `ship/runtime.mjs`; rehearsal F8) and `@aiosbrain/foundation` for the hub imports.
