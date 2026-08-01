@@ -1,0 +1,55 @@
+name: Publish @aiosbrain/aios-devtools to npm (Trusted Publishing / OIDC)
+
+# Tokenless npm publish via Trusted Publishing — no npm token stored anywhere.
+# Manual dispatch only, with an explicit version input that must EXACTLY match
+# package.json on the chosen ref (publishing is a deliberate act, never a merge
+# side effect). One-time npmjs.com setup: package Settings → Trusted Publisher →
+# GitHub Actions: org `aiosbrain`, repo `aios-devtools`, workflow `publish-npm.yml`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish — must equal package.json's version on this ref (e.g. 0.2.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write # REQUIRED: lets the job mint the OIDC token npm verifies
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      # Trusted publishing needs npm >= 11.5.1 (newer than the npm bundled with Node 22).
+      - name: Upgrade npm
+        run: npm install -g npm@latest
+
+      - name: Version guard (input must match package.json)
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$INPUT_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::input version '$INPUT_VERSION' != package.json version '$PKG_VERSION' on this ref — bump package.json first."
+            exit 1
+          fi
+
+      - name: Install
+        run: npm ci
+
+      - name: No-toolkit test gate before publishing
+        run: npm test
+
+      - name: Publish @aiosbrain/aios-devtools
+        run: npm publish
