@@ -38,18 +38,50 @@ function jobBlock(workflow, jobName) {
   return lines.slice(startIndex, endIndex).join("\n");
 }
 
-// The behaviorally meaningful lines of a job block: every line except pure comments and
-// blank lines (trailing whitespace stripped). Comment-only edits, key reordering noise, and
-// prose never affect this; any actual key/value/command does. Used for exact-match
-// "allowlist" assertions instead of scanning for individual forbidden substrings — shell has
-// unbounded ways to discard a non-zero exit (`|| :`, `; true`, `if ! cmd; then :; fi`,
-// trailing `exit 0`, ...); asserting the one command that is allowed to run, verbatim,
-// catches all of them by construction instead of requiring a new blacklist rule per idiom.
+// The behaviorally meaningful lines of a job block: blank lines and pure YAML-level comment
+// lines are dropped (order is otherwise preserved as-is, so a key reorder or a name/runs-on
+// swap still shows up as a diff — only comment-only edits and blank-line noise are ignored).
+// Used for exact-match "allowlist" assertions instead of scanning for individual forbidden
+// substrings — shell has unbounded ways to discard a non-zero exit (`|| :`, `; true`,
+// `if ! cmd; then :; fi`, trailing `exit 0`, ...); asserting the one command that is allowed
+// to run, verbatim, catches all of them by construction instead of requiring a new blacklist
+// rule per idiom.
+//
+// Comment leniency stops at the boundary of a `run: |`/`run: >` block scalar. GitHub Actions
+// expands `${{ ... }}` expressions into the script text *before* the shell ever parses it, so
+// a `#`-prefixed line inside `run:` is not inert the way a YAML comment is — an expression
+// built from untrusted input (e.g. `${{ github.event.pull_request.body }}`) can contain a
+// newline that breaks out of the "comment" and executes. Every line inside an active run
+// block is therefore treated as significant, comment-shaped or not; only lines outside any
+// run block get comment/blank leniency.
 function significantLines(block) {
-  return block
-    .split("\n")
-    .map((line) => line.replace(/\s+$/, ""))
-    .filter((line) => line.trim() !== "" && !line.trim().startsWith("#"));
+  const lines = block.split("\n");
+  const result = [];
+  let runBlockIndent = null; // set while inside a `run: |`/`run: >` block scalar
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\s+$/, "");
+    const indent = line.match(/^(\s*)/)[1].length;
+
+    if (runBlockIndent !== null) {
+      if (line.trim() === "") continue; // blank lines don't end a YAML block scalar
+      if (indent > runBlockIndent) {
+        result.push(line); // inside the run body — always significant, comments included
+        continue;
+      }
+      runBlockIndent = null; // dedented back out of the block scalar
+    }
+
+    const runStart = line.match(/^(\s*)run:\s*[|>][+-]?\s*$/);
+    if (runStart) {
+      result.push(line);
+      runBlockIndent = runStart[1].length;
+      continue;
+    }
+
+    if (line.trim() === "" || line.trim().startsWith("#")) continue; // YAML-level comment
+    result.push(line);
+  }
+  return result;
 }
 
 test("all workflows SHA-pin third-party Actions and every checkout drops credentials", () => {
@@ -157,6 +189,13 @@ test("health upload failures are not retried with a destructive plain upload", (
   );
 });
 
+// AIO-699: the pin this whole lane exists to police. Named once so the SHA assertion below,
+// the bump instructions, and PINNED_JOB_LINES all point at the same single source of truth —
+// bumping the pin (per docs/devtools-toolkit-contract.md's reconcile-then-bump procedure)
+// means updating THIS constant and the matching `ref:` line inside PINNED_JOB_LINES together,
+// in the same PR. Never let the two drift apart.
+const PINNED_TOOLKIT_SHA = "a48356602eb73c41b6945de8211aabc4064e8a65";
+
 // AIO-699: the pinned `unit tests` job is the baseline toolkit-drift is measured against.
 // Comparing only its pin SHA lets its *behavior* drift silently (e.g. its provisioning
 // quietly gaining/losing --ignore-scripts) while looking untouched. Assert the properties
@@ -176,7 +215,7 @@ const PINNED_JOB_LINES = [
   "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
   "        with:",
   "          repository: aiosbrain/aios-workspace",
-  "          ref: a48356602eb73c41b6945de8211aabc4064e8a65",
+  `          ref: ${PINNED_TOOLKIT_SHA}`,
   "          path: toolkit-checkout",
   "          persist-credentials: false",
   "      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
@@ -189,6 +228,7 @@ const PINNED_JOB_LINES = [
   "        working-directory: toolkit-checkout",
   "        run: |",
   "          npm ci",
+  "          # compiled operator loop dist — the spec-eval advisory path loads it via the seam",
   "          npm run build:loop --if-present",
   "      - name: Test",
   "        env:",
@@ -205,7 +245,7 @@ test("AIO-699: the pinned `unit tests` job's contract is unchanged", () => {
   // measured against, so each one is asserted independently, not folded into one hash.
   assert.match(
     pinnedJob,
-    /ref: a48356602eb73c41b6945de8211aabc4064e8a65\b/,
+    new RegExp(`ref: ${PINNED_TOOLKIT_SHA}\\b`),
     "the AIO-685 pin must remain exact-SHA and untouched"
   );
   assert.match(pinnedJob, /repository: aiosbrain\/aios-workspace/, "checkout target unchanged");
@@ -276,6 +316,7 @@ const TOOLKIT_DRIFT_LINES = [
   "        working-directory: toolkit-checkout",
   "        run: |",
   "          npm ci --ignore-scripts",
+  "          # compiled operator loop dist — the spec-eval advisory path loads it via the seam",
   "          npm run build:loop --if-present",
   "      - name: Test",
   "        env:",
