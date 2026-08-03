@@ -15,7 +15,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,9 +33,8 @@ const CLI = path.join(DEVTOOLS_ROOT, "scripts", "cli.mjs");
 const FILLED = path.join(DIR, "fixtures", "spec-eval", "aios-issue-filled.md");
 
 // The standard staged spec workspace (core rubric + delivery skill suite + the devtools files
-// the fixtures name as integration points), plus two things this contract additionally needs:
-// the core-owned aios-issue-template at its canonical relative path, and an `aios.yaml` marker
-// so the devtools bin (which derives `repo` from cwd) resolves this dir as the repo.
+// the fixtures name as integration points, and the `aios.yaml` marker the devtools bin resolves
+// `repo` by), plus the core-owned aios-issue-template at its canonical relative path.
 function stageTemplateWorkspace() {
   const base = stageSpecWorkspace();
   if (!base.dir) return base;
@@ -61,7 +60,6 @@ function stageTemplateWorkspace() {
     mkdirSync(path.dirname(dst), { recursive: true });
     cpSync(from, dst);
   }
-  writeFileSync(path.join(base.dir, "aios.yaml"), "version: 1\n", "utf8");
   return base;
 }
 
