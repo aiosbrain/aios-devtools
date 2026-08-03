@@ -23,6 +23,21 @@ function workflowSteps(workflow) {
   );
 }
 
+// Top-level job blocks are keyed by a two-space-indented `<name>:` line; the block runs
+// until the next such line (or EOF), minus any trailing blank/comment lines that are
+// actually the lead-in commentary for the *next* job. Used to scope assertions to one job.
+function jobBlock(workflow, jobName) {
+  const lines = workflow.split("\n");
+  const startIndex = lines.findIndex((line) => line === `  ${jobName}:`);
+  if (startIndex === -1) return undefined;
+  const nextTopLevel = lines
+    .slice(startIndex + 1)
+    .findIndex((line) => /^  [A-Za-z0-9_-]+:$/.test(line));
+  let endIndex = nextTopLevel === -1 ? lines.length : startIndex + 1 + nextTopLevel;
+  while (endIndex > startIndex + 1 && /^\s*(#.*)?$/.test(lines[endIndex - 1])) endIndex -= 1;
+  return lines.slice(startIndex, endIndex).join("\n");
+}
+
 test("all workflows SHA-pin third-party Actions and every checkout drops credentials", () => {
   let externalActionCount = 0;
   let checkoutCount = 0;
@@ -126,6 +141,48 @@ test("health upload failures are not retried with a destructive plain upload", (
     scanWorkflow,
     /scan_with_health\.py[\s\S]*?\|\|\s+python -m aios_ingest\.cli scan/
   );
+});
+
+test("AIO-699 toolkit-drift lane tracks core main, reports failures visibly, and the pinned lane is untouched", () => {
+  const pinnedJob = jobBlock(ciWorkflow, "test");
+  assert.ok(pinnedJob, "the pinned `test` (unit tests) job must still exist");
+  assert.match(
+    pinnedJob,
+    /ref: a48356602eb73c41b6945de8211aabc4064e8a65/,
+    "the AIO-685 pin must remain exact-SHA and untouched"
+  );
+
+  const driftJob = jobBlock(ciWorkflow, "toolkit-drift");
+  assert.ok(driftJob, "the AIO-699 toolkit-drift job must exist");
+
+  // The whole point of the lane is a visible red check on drift: continue-on-error would
+  // report green at the check level even when the job fails internally, recreating the
+  // silent-drift problem AIO-699 exists to fix. Non-blocking status must come from branch
+  // protection (the check simply not being required), never from swallowing the failure here.
+  assert.doesNotMatch(driftJob, /continue-on-error/, "toolkit-drift must not swallow failures");
+
+  // It must track core's floating main, not a SHA — that's what makes it a drift detector
+  // rather than a second copy of the pinned lane.
+  const toolkitCheckout = driftJob
+    .split(/\n(?=      - name: Checkout AIOS toolkit)/)
+    .find((block) => block.includes("- name: Checkout AIOS toolkit"));
+  assert.ok(toolkitCheckout, "toolkit-drift must have its own toolkit checkout step");
+  assert.match(toolkitCheckout, /ref: main\s*$/m);
+  assert.doesNotMatch(toolkitCheckout, /ref: [0-9a-f]{40}/);
+
+  // Both installs in this job must skip lifecycle scripts: the checkout tracks unreviewed,
+  // ever-changing core source, so install-time hooks are an open vector. Count only
+  // executable lines, excluding `#`-comment prose that also mentions the command.
+  const executableInstallLines = driftJob
+    .split("\n")
+    .filter((line) => /npm ci --ignore-scripts/.test(line) && !/^\s*#/.test(line));
+  assert.equal(executableInstallLines.length, 2);
+  assert.doesNotMatch(driftJob, /npm install(?!\s+-g)/, "no unpinned npm install fallback");
+
+  // Job-level blast-radius bounds: read-only checkout permissions and a runaway-run cap.
+  assert.match(driftJob, /^    permissions:\n\s+contents: read$/m);
+  assert.match(driftJob, /^    timeout-minutes: \d+$/m);
+  assert.doesNotMatch(driftJob, /secrets\./, "toolkit-drift must never see a secret");
 });
 
 test("the exact toolkit pin resolves from the public npm registry", () => {
