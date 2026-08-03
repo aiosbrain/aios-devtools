@@ -88,8 +88,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: aiosbrain/aios-workspace
-          # AIO-594 cut baseline — repin to the release tag once the devtools cut ships
-          ref: 10099cd8b01bade40fd16f296fa523ef20b228c3
+          # AIO-685 contract pin: current core candidate, including corrected SR18 semantics.
+          # Keep exact-SHA pinned so the CI input is reproducible; bumps must reconcile drift.
+          ref: a48356602eb73c41b6945de8211aabc4064e8a65
           path: toolkit-checkout
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
