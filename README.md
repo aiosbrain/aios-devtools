@@ -70,9 +70,11 @@ an installed, version-pinned distribution of this package (spec: Dispatch Contra
 Cut from **`aiosbrain/aios-workspace` @ `10099cd8b01bade40fd16f296fa523ef20b228c3`**
 (AIO-594) via `git filter-repo` over the declared extraction + copy path manifests.
 History for every travelling file is preserved (`git log --follow` depth matches core).
-Copied-infrastructure files are temporary duplicates with a 7-day convergence
-deadline — see `docs/copy-ledger.md` for the tracked convergence ledger (required
-terminal dispositions + status) and `NOTES.md` for the cut-time notes.
+Copied-infrastructure files are temporary duplicates tracked as ongoing backlog under
+**Linear AIO-663** — there is no convergence deadline (the repo owner dropped the
+original 7-day deadline on 2026-08-03). See `docs/copy-ledger.md` for the tracked
+convergence ledger (required terminal dispositions + status) and `NOTES.md` for the
+cut-time notes.
 
 ## The toolkit contract
 

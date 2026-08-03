@@ -3,13 +3,15 @@
 Cut source: **`aiosbrain/aios-workspace` @ `10099cd8b01bade40fd16f296fa523ef20b228c3`**
 (origin/main, post-seam PR #511). Staged 2026-07-31.
 
-## Copy ledger — temporary duplicates (7-day convergence deadline)
+## Copy ledger — temporary duplicates (ongoing backlog, AIO-663)
 
 Every file below is a **copy** of the core file at source SHA `10099cd8`; core keeps its
-own. Deadline: **7 days from the initial push of this history to
-`aiosbrain/aios-devtools`** — by then each file must either move behind a
-`@aiosbrain/foundation` export, be adopted as devtools-owned (deleted in core), or be
-re-declared with a new deadline in the cut follow-up issue.
+own. There is **no convergence deadline**: on 2026-08-03 the repo owner (John Ellison)
+made the explicit decision to drop the original 7-day deadline and track convergence as
+ordinary backlog under **Linear AIO-663**, with no expiry. Each file must still resolve
+to one of: move behind a `@aiosbrain/foundation` export, be adopted as devtools-owned
+(deleted in core), or be recorded as intentionally core-owned via the toolkit seam — see
+`docs/copy-ledger.md` for per-file status and Linear tracking.
 
 | File | Planned convergence path |
 |------|--------------------------|
@@ -34,7 +36,7 @@ re-declared with a new deadline in the cut follow-up issue.
 Governance-stamp files (`scripts/check-file-size.mjs`, `check-boundaries.mjs`,
 `git-files.mjs`, `leak-gate.sh`, `validation/agent-readiness-lib.mjs`, `.harness/**`) are
 **managed by `aios repo-bootstrap`** (see `.aios-bootstrap-version`) — re-synced by re-running
-the stamp, not subject to the 7-day copy deadline.
+the stamp, not part of the copy ledger tracked under AIO-663.
 
 ## Convergence items (recorded, not fixed here)
 
