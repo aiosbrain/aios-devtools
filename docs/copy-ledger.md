@@ -12,25 +12,35 @@ with no expiry. Every item must still receive one terminal disposition: foundati
 export, Devtools ownership with core deletion, or intentional core ownership with
 Devtools consumption through the toolkit seam.
 
+Dropping the deadline removed the timebox, **not the obligation**. Every row below is
+still `unresolved` — it is de-timeboxed backlog, not work in flight. A row advances to
+`in-progress` only when someone is actually executing it, so that a status read of this
+table cannot overstate how much is underway.
+
+**AIO-663 is the umbrella tracker** for the ledger as a whole. Individual rows may carry
+a more specific issue that executes that row's work: row 13 is owned by **AIO-686**, and
+row 1 is entangled with **AIO-684** (the CLI marker tokens defined in `relay-core.mjs`).
+Reporting on AIO-663 alone therefore understates the ledger — read the Linear column.
+
 | # | Temporary copy | Required disposition | Status | Linear issue |
 |---|----------------|----------------------|--------|--------------|
-| 1 | `scripts/relay-core.mjs` | foundation export or Devtools-owned | in-progress | AIO-663 (entangled with AIO-684) |
-| 2 | `scripts/model-call.mjs` | foundation model-dispatch export | in-progress | AIO-663 |
-| 3 | `scripts/loop-models.mjs` | foundation model-dispatch export | in-progress | AIO-663 |
-| 4 | `scripts/model-providers.mjs` | foundation model-dispatch export | in-progress | AIO-663 |
-| 5 | `scripts/pr.mjs` | foundation GitHub-plumbing export | in-progress | AIO-663 |
-| 6 | `scripts/skill-context.mjs` | foundation skill-context export | in-progress | AIO-663 |
-| 7 | `scripts/cli-common.mjs` | foundation CLI-plumbing export | in-progress | AIO-663 |
-| 8 | `scripts/ui/output-context.mjs` | foundation CLI-plumbing export | in-progress | AIO-663 |
-| 9 | `scripts/severity.mjs` | foundation severity export | in-progress | AIO-663 |
-| 10 | `scripts/verify-cmd.mjs` | foundation verification-command export | in-progress | AIO-663 |
-| 11 | `scripts/spec-checks.mjs` | foundation deterministic-spec export | in-progress | AIO-663 |
-| 12 | `scripts/spec-checks/deterministic.mjs` | move with spec-checks export | in-progress | AIO-663 |
-| 13 | `scripts/spec-checks/rubric.mjs` | move with spec-checks; replace module-relative rubric fallback with toolkit resolution | in-progress | AIO-686 |
-| 14 | `scripts/spec-checks/spec-text.mjs` | move with spec-checks export | in-progress | AIO-663 |
-| 15 | `scripts/scan-file.mjs` | foundation scan export | in-progress | AIO-663 |
-| 16 | `scripts/toolkit-locate.mjs` | foundation locator export or separately versioned identical contract implementation | in-progress | AIO-663 |
-| 17 | `docs/devtools-toolkit-contract.md` | Devtools canonical; Workspace retains a short consumer contract/link | in-progress | AIO-663 |
+| 1 | `scripts/relay-core.mjs` | foundation export or Devtools-owned | unresolved | AIO-663 (entangled with AIO-684) |
+| 2 | `scripts/model-call.mjs` | foundation model-dispatch export | unresolved | AIO-663 |
+| 3 | `scripts/loop-models.mjs` | foundation model-dispatch export | unresolved | AIO-663 |
+| 4 | `scripts/model-providers.mjs` | foundation model-dispatch export | unresolved | AIO-663 |
+| 5 | `scripts/pr.mjs` | foundation GitHub-plumbing export | unresolved | AIO-663 |
+| 6 | `scripts/skill-context.mjs` | foundation skill-context export | unresolved | AIO-663 |
+| 7 | `scripts/cli-common.mjs` | foundation CLI-plumbing export | unresolved | AIO-663 |
+| 8 | `scripts/ui/output-context.mjs` | foundation CLI-plumbing export | unresolved | AIO-663 |
+| 9 | `scripts/severity.mjs` | foundation severity export | unresolved | AIO-663 |
+| 10 | `scripts/verify-cmd.mjs` | foundation verification-command export | unresolved | AIO-663 |
+| 11 | `scripts/spec-checks.mjs` | foundation deterministic-spec export | unresolved | AIO-663 |
+| 12 | `scripts/spec-checks/deterministic.mjs` | move with spec-checks export | unresolved | AIO-663 |
+| 13 | `scripts/spec-checks/rubric.mjs` | move with spec-checks; replace module-relative rubric fallback with toolkit resolution | unresolved | AIO-686 |
+| 14 | `scripts/spec-checks/spec-text.mjs` | move with spec-checks export | unresolved | AIO-663 |
+| 15 | `scripts/scan-file.mjs` | foundation scan export | unresolved | AIO-663 |
+| 16 | `scripts/toolkit-locate.mjs` | foundation locator export or separately versioned identical contract implementation | unresolved | AIO-663 |
+| 17 | `docs/devtools-toolkit-contract.md` | Devtools canonical; Workspace retains a short consumer contract/link | unresolved | AIO-663 |
 
 Governance-stamp files (`scripts/check-file-size.mjs`, `scripts/check-boundaries.mjs`,
 `scripts/git-files.mjs`, `scripts/leak-gate.sh`, `validation/agent-readiness-lib.mjs`,
