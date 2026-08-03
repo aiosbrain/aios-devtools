@@ -83,3 +83,25 @@ devtools; devtools → core is allowed). The seam's non-literal
 `import(pathToFileURL(join(toolkitRoot, …)))` is deliberately outside the gate's literal-import
 parser; the guarantee that devtools files carry **no static or literal-dynamic imports** of the
 stays-core engine set is enforced by `test/devtools-seam.test.mjs` instead.
+
+## The pin drifts silently unless something checks it (AIO-699)
+
+The `unit tests` job's toolkit checkout is pinned to an exact core SHA (see the `# AIO-685
+contract pin` comment on that step). That pin is what makes the lane reproducible, but it is
+also exactly what let the pinned lane stay green while devtools-against-real-core drifted
+unnoticed (AIO-685) — bumping the pin once doesn't remove that mechanism, it just resets the
+clock.
+
+`ci.yml` also runs `toolkit-drift`: the same suite, same `AIOS_TOOLKIT_DIR` wiring, checked out
+against `aiosbrain/aios-workspace@main` instead of the pin. It is `continue-on-error: true` and
+is not a required status check — it exists to be looked at, not to block merges.
+
+Procedure when `toolkit-drift` goes red:
+
+1. Read its failure — it means core `main` has moved in a way the pinned devtools suites don't
+   yet handle (same shape as the AIO-685 SR18 drift).
+2. Reconcile the drift in devtools (update the affected suite/consumer to match core's current
+   contract), the same way AIO-685 did.
+3. Bump the pin in the `unit tests` job's `Checkout AIOS toolkit` step to the reconciled core
+   SHA, in the **same PR** as the reconciliation — never bump the pin alone, and never leave the
+   reconciliation stacked behind a separate pin bump.

@@ -111,6 +111,52 @@ jobs:
         run: |
           if [ -f package.json ]; then npm run test --if-present; else echo "no package.json — skipping tests"; fi
 
+  # AIO-699 — advisory-only lane: mirrors the `unit tests` job above but resolves the
+  # toolkit checkout against core `main` instead of the AIO-685 pin, so pin drift shows up
+  # here (red) well before it silently rots the pinned lane. continue-on-error keeps this
+  # non-blocking by design: it must never gate merges or become a required status check.
+  # See docs/devtools-toolkit-contract.md for the reconcile-then-bump procedure.
+  toolkit-drift:
+    name: toolkit drift (advisory, core main)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Toolkit-dependent suites resolve core-owned content (spec rubric, delivery skill
+      # suite, validation/ gate tree) and the stays-core seam engines through a real AIOS
+      # toolkit checkout (docs/devtools-toolkit-contract.md): without AIOS_TOOLKIT_DIR
+      # they skip with a named reason by design — this checkout makes them run.
+      - name: Checkout AIOS toolkit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: aiosbrain/aios-workspace
+          # AIO-699: track core main directly (never a pin) so drift from the AIO-685 pin
+          # surfaces here first, not silently on the pinned lane.
+          ref: main
+          path: toolkit-checkout
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+      - name: Provision toolkit (deps + operator-loop dist)
+        working-directory: toolkit-checkout
+        run: |
+          npm ci
+          # compiled operator loop dist — the spec-eval advisory path loads it via the seam
+          npm run build:loop --if-present
+      - name: Test
+        env:
+          AIOS_TOOLKIT_DIR: ${{ github.workspace }}/toolkit-checkout
+        run: |
+          if [ -f package.json ]; then npm run test --if-present; else echo "no package.json — skipping tests"; fi
+
   # AIO-594 PR A — the no-toolkit behavior lane: proves the package is standalone-green
   # (seam-dependent suites skip with a NAMED reason, never crash) exactly as a fresh
   # `npm install @aiosbrain/aios-devtools` consumer without a workspace would see it.
