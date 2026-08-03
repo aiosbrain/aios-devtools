@@ -30,6 +30,7 @@ export const DETERMINISTIC_CHECK_IDS = new Set([
   "SR10",
   "SR16",
   "SR17",
+  "SR18",
 ]);
 
 // ── SR17: increment-bound (scope-size) assessment ─────────────────────────────────────────────
@@ -64,6 +65,84 @@ const SR17_SURFACES = [
 // An explicit statement that the author has bounded the increment to one PR.
 const SR17_INCREMENT_RE =
   /\b(one\s+pr|single\s+pr|this\s+pr\b|one\s+increment|line\s+budget|~?\d{2,4}\s*(loc|lines)\b|follow-?ups?\s+(are\s+)?deferred|sibling\s+spec|split\s+into\s+\w+\s+spec|first\s+slice|slice\s+\d|one\s+surface)\b/i;
+
+// ── SR18: scope-fence accounting ─────────────────────────────────────────────────────────
+//
+// A blanket constraint ("no change to any file that `/` renders", "must be byte-identical") is the
+// cheapest way to lose work. It reads as discipline, it passes SR5 because a Scope section still
+// exists, and everything the fence quietly excludes simply never appears in the spec at all. Not
+// hypothetical: a website rebuild spec fenced with "No change to any file that / renders" and
+// seven items from its own source audit were never re-homed, because nothing in the gate required
+// the author to say where fenced work goes.
+//
+// The deterministic half is narrow on purpose. It cannot know WHAT a fence excludes, so it does
+// not try; it only requires that a spec raising a fence names a destination for what the fence
+// pushes out. The adversarial layer judges whether that accounting is actually complete.
+const SR18_DIRECT_FENCE_PATTERNS = [
+  /\bno changes? to any\b/i,
+  /\bmust (?:be|remain) (?:byte-)?identical\b/i,
+  /\bbyte-identical\b/i,
+  /\bmust not be (?:modified|changed|touched)\b/i,
+  /\bnot modified by this (?:slice|spec|pr)\b/i,
+  /\bdo not (?:modify|touch|change) [^.\n]{0,40}/i,
+  /\bunchanged (?:against|from) /i,
+];
+
+// "Leave it unchanged" describes one item and is not a blanket scope fence. Treat a leave-clause
+// as a fence only when its target is explicitly class-wide (a quantifier or a plural surface).
+const SR18_LEAVE_RE = /\bleave\s+([^.\n]{1,80}?)\s+(?:untouched|unchanged)\b/gi;
+const SR18_CLASS_WIDE_TARGET_RE =
+  /\b(?:all|any|every|everything|anything|entire|files|pages|routes|outputs|artifacts|content)\b/i;
+
+// Naming where the excluded work goes. A "Deferred:" list alone does NOT count: the spec that
+// prompted this criterion had one, and the fenced items still were not in it.
+const SR18_DESTINATION_RE =
+  /\b(sibling spec|follow-?up spec|separate spec|its own spec|a later spec|tracked (as|in|under)\b|deferred to\b|filed as\b|raised as\b|follow-?up issue|nothing is excluded|excludes nothing|fenced out)/i;
+
+// Only scope-bearing sections can raise a scope fence. "leave it unchanged" written against one
+// entry in an integration list is a per-file note, not a constraint that excludes a class of work,
+// and conflating the two made SR18 fire on well-formed specs.
+const SR18_SCOPE_SECTION_RE =
+  /\b(scope|outcomes?|acceptance|success crit|done when|non-?goals?|not doing|deferred)\b/i;
+
+/**
+ * Does the spec raise a blanket scope fence, and if so does it say where the fenced work goes?
+ * The fence is looked for only in scope-bearing sections; the destination may be stated anywhere.
+ * Pure + deterministic so it can be unit-tested directly.
+ */
+export function assessScopeFence(specText) {
+  const ancestry = [];
+  const scopeBodies = [];
+  for (const sec of extractSections(specText)) {
+    if (sec.level === 0) continue;
+    while (ancestry.length && ancestry.at(-1).level >= sec.level) ancestry.pop();
+    const inScope = SR18_SCOPE_SECTION_RE.test(sec.heading) || Boolean(ancestry.at(-1)?.inScope);
+    if (inScope) scopeBodies.push(sec.body);
+    ancestry.push({ level: sec.level, inScope });
+  }
+  const scopeText = scopeBodies.join("\n");
+  let phrase = null;
+  for (const pattern of SR18_DIRECT_FENCE_PATTERNS) {
+    const match = scopeText.match(pattern);
+    if (match) {
+      phrase = match[0].trim();
+      break;
+    }
+  }
+  if (!phrase) {
+    for (const match of scopeText.matchAll(SR18_LEAVE_RE)) {
+      if (SR18_CLASS_WIDE_TARGET_RE.test(match[1])) {
+        phrase = match[0].trim();
+        break;
+      }
+    }
+  }
+  return {
+    fenced: Boolean(phrase),
+    phrase,
+    destinationNamed: SR18_DESTINATION_RE.test(specText),
+  };
+}
 
 /**
  * Structurally assess whether a spec is bounded to one reviewable PR. Pure + deterministic so it can
@@ -217,6 +296,20 @@ export function runDeterministicChecks(specText, { repo } = {}) {
         "SR2",
         "minor",
         "### Automated has bullets but none look observable — prefer exit codes, named tests, or concrete commands"
+      );
+    }
+  }
+
+  // SR18 — a blanket scope fence must name a destination for what it excludes (conditional:
+  // fires only when a fence is actually raised). Without this, "do not touch X" silently drops
+  // every item that lives in X and the spec still passes SR5, because a Scope section exists.
+  {
+    const fence = assessScopeFence(specText);
+    if (fence.fenced && !fence.destinationNamed) {
+      add(
+        "SR18",
+        "blocker",
+        `scope fence "${fence.phrase}" excludes work but names nowhere for it to go — list what the fence pushes out and where it lands (a sibling spec, a follow-up issue), or state that it excludes nothing`
       );
     }
   }
