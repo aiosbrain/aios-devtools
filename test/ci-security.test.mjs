@@ -110,6 +110,24 @@ test("scan dependencies are immutable and install without lifecycle/source build
   assert.equal((requirements.match(/--hash=sha256:[0-9a-f]{64}/g) ?? []).length, requirementLines.length);
 });
 
+test("optional coverage dependency failures do not abort the Brain scan", () => {
+  assert.match(
+    scanWorkflow,
+    /if npm ci --ignore-scripts; then[\s\S]*?npm run test:coverage \|\| true/
+  );
+  assert.match(
+    scanWorkflow,
+    /else\n\s+echo "dependency install failed — continuing without a coverage report\."/
+  );
+});
+
+test("health upload failures are not retried with a destructive plain upload", () => {
+  assert.doesNotMatch(
+    scanWorkflow,
+    /scan_with_health\.py[\s\S]*?\|\|\s+python -m aios_ingest\.cli scan/
+  );
+});
+
 test("the exact toolkit pin resolves from the public npm registry", () => {
   const match = scanWorkflow.match(
     /npm install -g (@aiosbrain\/aios@(\d+\.\d+\.\d+)) --ignore-scripts/
