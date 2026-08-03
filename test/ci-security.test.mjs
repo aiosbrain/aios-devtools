@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +36,20 @@ function jobBlock(workflow, jobName) {
   let endIndex = nextTopLevel === -1 ? lines.length : startIndex + 1 + nextTopLevel;
   while (endIndex > startIndex + 1 && /^\s*(#.*)?$/.test(lines[endIndex - 1])) endIndex -= 1;
   return lines.slice(startIndex, endIndex).join("\n");
+}
+
+// The behaviorally meaningful lines of a job block: every line except pure comments and
+// blank lines (trailing whitespace stripped). Comment-only edits, key reordering noise, and
+// prose never affect this; any actual key/value/command does. Used for exact-match
+// "allowlist" assertions instead of scanning for individual forbidden substrings — shell has
+// unbounded ways to discard a non-zero exit (`|| :`, `; true`, `if ! cmd; then :; fi`,
+// trailing `exit 0`, ...); asserting the one command that is allowed to run, verbatim,
+// catches all of them by construction instead of requiring a new blacklist rule per idiom.
+function significantLines(block) {
+  return block
+    .split("\n")
+    .map((line) => line.replace(/\s+$/, ""))
+    .filter((line) => line.trim() !== "" && !line.trim().startsWith("#"));
 }
 
 test("all workflows SHA-pin third-party Actions and every checkout drops credentials", () => {
@@ -144,87 +157,148 @@ test("health upload failures are not retried with a destructive plain upload", (
   );
 });
 
-test("AIO-699: the pinned `unit tests` job is byte-for-byte untouched", () => {
+// AIO-699: the pinned `unit tests` job is the baseline toolkit-drift is measured against.
+// Comparing only its pin SHA lets its *behavior* drift silently (e.g. its provisioning
+// quietly gaining/losing --ignore-scripts) while looking untouched. Assert the properties
+// that actually matter, then back them with a readable line-by-line snapshot — a diff of
+// what changed, not an opaque hash two people have to trust blindly.
+const PINNED_JOB_LINES = [
+  "  test:",
+  "    name: unit tests",
+  "    runs-on: ubuntu-latest",
+  "    permissions:",
+  "      contents: read",
+  "    steps:",
+  "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+  "        with:",
+  "          persist-credentials: false",
+  "      - name: Checkout AIOS toolkit",
+  "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+  "        with:",
+  "          repository: aiosbrain/aios-workspace",
+  "          ref: a48356602eb73c41b6945de8211aabc4064e8a65",
+  "          path: toolkit-checkout",
+  "          persist-credentials: false",
+  "      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
+  "        with:",
+  "          node-version: 22",
+  "      - name: Install dependencies",
+  "        run: |",
+  '          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi',
+  "      - name: Provision toolkit (deps + operator-loop dist)",
+  "        working-directory: toolkit-checkout",
+  "        run: |",
+  "          npm ci",
+  "          npm run build:loop --if-present",
+  "      - name: Test",
+  "        env:",
+  "          AIOS_TOOLKIT_DIR: ${{ github.workspace }}/toolkit-checkout",
+  "        run: |",
+  '          if [ -f package.json ]; then npm run test --if-present; else echo "no package.json — skipping tests"; fi',
+];
+
+test("AIO-699: the pinned `unit tests` job's contract is unchanged", () => {
   const pinnedJob = jobBlock(ciWorkflow, "test");
   assert.ok(pinnedJob, "the pinned `test` (unit tests) job must still exist");
+
+  // Semantic properties that define "the pinned lane" — these are what toolkit-drift is
+  // measured against, so each one is asserted independently, not folded into one hash.
   assert.match(
     pinnedJob,
-    /ref: a48356602eb73c41b6945de8211aabc4064e8a65/,
+    /ref: a48356602eb73c41b6945de8211aabc4064e8a65\b/,
     "the AIO-685 pin must remain exact-SHA and untouched"
   );
+  assert.match(pinnedJob, /repository: aiosbrain\/aios-workspace/, "checkout target unchanged");
+  assert.match(pinnedJob, /path: toolkit-checkout/, "checkout path unchanged");
+  assert.match(
+    pinnedJob,
+    /^          if \[ -f package-lock\.json \]; then npm ci; elif \[ -f package\.json \]; then npm install; fi$/m,
+    "devtools-side install command unchanged"
+  );
+  assert.match(
+    pinnedJob,
+    /^          npm ci$/m,
+    "toolkit provisioning install must stay plain `npm ci` (no flags silently added or removed)"
+  );
+  assert.doesNotMatch(
+    pinnedJob,
+    /npm ci --ignore-scripts/,
+    "the pinned lane's install behavior must not silently change"
+  );
+  assert.match(pinnedJob, /npm run build:loop --if-present/, "operator-loop build step unchanged");
+  assert.match(
+    pinnedJob,
+    /^          if \[ -f package\.json \]; then npm run test --if-present; else echo "no package\.json — skipping tests"; fi$/m,
+    "unconditional test invocation unchanged"
+  );
 
-  // A SHA-only check permits arbitrary behavioral drift in the *control* lane (e.g. its
-  // provisioning silently gaining or losing --ignore-scripts) while looking "untouched" —
-  // which defeats the purpose, since this lane is the baseline toolkit-drift is measured
-  // against. Hash the complete, normalized job block instead: any change at all to this
-  // job's contract fails this test loudly and forces a deliberate update of the expected
-  // hash below, alongside a note of what changed and why.
-  //
-  // Intentionally changing the pinned job (including an AIO-685 pin bump)? Recompute with:
-  //   node -e "console.log(require('crypto').createHash('sha256').update(<block>).digest('hex'))"
-  // and update PINNED_JOB_SHA256 in the same PR — never let it drift silently.
-  const actualHash = createHash("sha256").update(pinnedJob).digest("hex");
-  const PINNED_JOB_SHA256 = "eb13c21b5128415734414e1d8d5f656e5c86accd4aa081f5976948139861697f";
-  assert.equal(
-    actualHash,
-    PINNED_JOB_SHA256,
-    "the pinned `test` job's full contract changed — if intentional, update PINNED_JOB_SHA256 " +
-      "in this test in the same PR, with a note of what changed and why"
+  // Readable snapshot, not a hash: on mismatch, Node prints the actual line-by-line diff
+  // against PINNED_JOB_LINES above, so a reviewer sees exactly what changed. If a change is
+  // intentional (including an AIO-685 pin bump), update PINNED_JOB_LINES in the same PR —
+  // copy the new lines straight out of this assertion's failure output.
+  assert.deepEqual(
+    significantLines(pinnedJob),
+    PINNED_JOB_LINES,
+    "the pinned `test` job changed — if intentional, paste the new lines from this diff into " +
+      "PINNED_JOB_LINES in the same PR, with a note of what changed and why"
   );
 });
 
-test("AIO-699 toolkit-drift lane tracks core main and reports failures visibly", () => {
+// AIO-699: the toolkit-drift job's steps, verbatim. This is an allowlist, not a blacklist —
+// any mutation to a run command, checkout target, or job setting produces a line that no
+// longer matches one of these, so it fails by construction. That's what makes it catch
+// idioms nobody has enumerated yet (`|| :`, `; true`, `if ! cmd; then :; fi`, a trailing
+// `exit 0`, ...) instead of requiring a new forbidden-substring rule per idiom discovered.
+const TOOLKIT_DRIFT_LINES = [
+  "  toolkit-drift:",
+  "    name: toolkit drift (advisory, core main)",
+  "    runs-on: ubuntu-latest",
+  "    timeout-minutes: 15",
+  "    permissions:",
+  "      contents: read",
+  "    steps:",
+  "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+  "        with:",
+  "          persist-credentials: false",
+  "      - name: Checkout AIOS toolkit",
+  "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+  "        with:",
+  "          repository: aiosbrain/aios-workspace",
+  "          ref: main",
+  "          path: toolkit-checkout",
+  "          persist-credentials: false",
+  "      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
+  "        with:",
+  "          node-version: 22",
+  "      - name: Install dependencies",
+  "        run: npm ci --ignore-scripts",
+  "      - name: Provision toolkit (deps + operator-loop dist)",
+  "        working-directory: toolkit-checkout",
+  "        run: |",
+  "          npm ci --ignore-scripts",
+  "          npm run build:loop --if-present",
+  "      - name: Test",
+  "        env:",
+  "          AIOS_TOOLKIT_DIR: ${{ github.workspace }}/toolkit-checkout",
+  "        run: |",
+  '          if [ -f package.json ]; then npm run test --if-present; else echo "no package.json — skipping tests"; fi',
+];
+
+test("AIO-699 toolkit-drift lane matches its allowlisted steps exactly", () => {
   const driftJob = jobBlock(ciWorkflow, "toolkit-drift");
   assert.ok(driftJob, "the AIO-699 toolkit-drift job must exist");
 
-  // The whole point of the lane is a visible red check on drift: continue-on-error would
-  // report green at the check level even when the job fails internally, recreating the
-  // silent-drift problem AIO-699 exists to fix. Non-blocking status must come from branch
-  // protection (the check simply not being required), never from swallowing the failure here.
-  assert.doesNotMatch(driftJob, /continue-on-error/, "toolkit-drift must not swallow failures");
-
-  // Same class of failure-swallowing, one level down: a run step can discard a non-zero
-  // exit with a shell construct just as effectively as continue-on-error does at the job
-  // level. None of these may appear anywhere in this job's steps.
-  assert.doesNotMatch(driftJob, /\|\|\s*true\b/, "no `|| true` swallowing a run step's exit code");
-  assert.doesNotMatch(
-    driftJob,
-    /\|\|\s*exit 0\b/,
-    "no `|| exit 0` swallowing a run step's exit code"
+  // Exact-match allowlist on every behaviorally meaningful line in the job. This is
+  // strictly stronger than scanning for forbidden substrings (continue-on-error, `|| true`,
+  // `|| exit 0`, `set +e`, ...): none of those substrings need to be enumerated here,
+  // because any of them — or any other exit-swallowing idiom — changes a run-step line
+  // away from what TOOLKIT_DRIFT_LINES says is the only thing allowed to run.
+  assert.deepEqual(
+    significantLines(driftJob),
+    TOOLKIT_DRIFT_LINES,
+    "toolkit-drift's steps no longer match the allowlisted contract — if intentional, paste " +
+      "the new lines from this diff into TOOLKIT_DRIFT_LINES in the same PR"
   );
-  assert.doesNotMatch(driftJob, /set \+e/, "no `set +e` disabling errexit in a run step");
-
-  // It must track core's floating main, not a SHA — that's what makes it a drift detector
-  // rather than a second copy of the pinned lane.
-  const toolkitCheckout = driftJob
-    .split(/\n(?=      - name: Checkout AIOS toolkit)/)
-    .find((block) => block.includes("- name: Checkout AIOS toolkit"));
-  assert.ok(toolkitCheckout, "toolkit-drift must have its own toolkit checkout step");
-  assert.match(toolkitCheckout, /ref: main\s*$/m);
-  assert.doesNotMatch(toolkitCheckout, /ref: [0-9a-f]{40}/);
-
-  // Both installs in this job must skip lifecycle scripts: the checkout tracks unreviewed,
-  // ever-changing core source, so install-time hooks are an open vector. Count only
-  // executable lines, excluding `#`-comment prose that also mentions the command.
-  const executableInstallLines = driftJob
-    .split("\n")
-    .filter((line) => /npm ci --ignore-scripts/.test(line) && !/^\s*#/.test(line));
-  assert.equal(executableInstallLines.length, 2);
-  assert.doesNotMatch(driftJob, /npm install(?!\s+-g)/, "no unpinned npm install fallback");
-
-  // Job-level blast-radius bounds: read-only checkout permissions and an explicit,
-  // meaningfully-tight runaway-run cap. GitHub's own default is 360 minutes, so accepting
-  // any digit string here (as a prior version of this test did) is weaker than asserting
-  // nothing — require a positive integer no greater than 15.
-  assert.match(driftJob, /^    permissions:\n\s+contents: read$/m);
-  const timeoutMatch = driftJob.match(/^ {4}timeout-minutes: (\d+)$/m);
-  assert.ok(timeoutMatch, "toolkit-drift must declare an explicit timeout-minutes");
-  const timeoutMinutes = Number(timeoutMatch[1]);
-  assert.ok(
-    timeoutMinutes > 0 && timeoutMinutes <= 15,
-    `timeout-minutes must be a positive integer <= 15, got ${timeoutMinutes}`
-  );
-  assert.doesNotMatch(driftJob, /secrets\./, "toolkit-drift must never see a repository/user secret");
 });
 
 test("the exact toolkit pin resolves from the public npm registry", () => {

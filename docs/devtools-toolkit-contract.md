@@ -93,8 +93,12 @@ unnoticed (AIO-685) — bumping the pin once doesn't remove that mechanism, it j
 clock.
 
 `ci.yml` also runs `toolkit-drift`: the same suite, same `AIOS_TOOLKIT_DIR` wiring, checked out
-against `aiosbrain/aios-workspace@main` instead of the pin. It is `continue-on-error: true` and
-is not a required status check — it exists to be looked at, not to block merges.
+against `aiosbrain/aios-workspace@main` instead of the pin. It reports failures the same way any
+other job does — no `continue-on-error`, no swallowed exit code — because a check that goes
+green regardless of what happened inside it is exactly the silent-drift failure mode this lane
+exists to catch. Its non-blocking status comes entirely from **branch protection**: the check is
+deliberately left out of the required-status-checks set, so it can go red without blocking a
+merge, and a maintainer has to look at it rather than rely on a green PR page.
 
 Procedure when `toolkit-drift` goes red:
 
