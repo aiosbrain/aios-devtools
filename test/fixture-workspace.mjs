@@ -5,7 +5,7 @@
 // (docs/devtools-toolkit-contract.md). Nothing here expands the production boundary:
 // runtime commands read the TARGET repo (a real workspace); only tests stage content.
 
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,6 +55,11 @@ export function stageSpecWorkspace() {
   if (!toolkit) return { dir: null, skip: toolkitSkip("spec rubric + delivery skill suite") };
 
   const dir = mkdtempSync(path.join(tmpdir(), "devtools-spec-ws-"));
+
+  // Workspace marker: the devtools bin (scripts/cli.mjs) derives `repo` by walking up from
+  // cwd looking for `.git` or `aios.yaml`. Tests that SPAWN the bin against this staged dir
+  // (AIO-662) need it to resolve here and not to some ancestor of the temp dir.
+  writeFileSync(path.join(dir, "aios.yaml"), "version: 1\n", "utf8");
 
   // core-owned content, resolved at runtime
   mkdirSync(path.join(dir, ".claude", "rubrics"), { recursive: true });
