@@ -121,6 +121,13 @@ test("optional coverage dependency failures do not abort the Brain scan", () => 
   );
 });
 
+test("health upload failures are not retried with a destructive plain upload", () => {
+  assert.doesNotMatch(
+    scanWorkflow,
+    /scan_with_health\.py[\s\S]*?\|\|\s+python -m aios_ingest\.cli scan/
+  );
+});
+
 test("the exact toolkit pin resolves from the public npm registry", () => {
   const match = scanWorkflow.match(
     /npm install -g (@aiosbrain\/aios@(\d+\.\d+\.\d+)) --ignore-scripts/
