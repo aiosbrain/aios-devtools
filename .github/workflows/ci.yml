@@ -116,6 +116,10 @@ jobs:
   # here (red) well before it silently rots the pinned lane. continue-on-error keeps this
   # non-blocking by design: it must never gate merges or become a required status check.
   # See docs/devtools-toolkit-contract.md for the reconcile-then-bump procedure.
+  #
+  # Blast-radius bound: read-only checkout permissions, no persisted git credentials, and
+  # no secrets anywhere in this job — the only untrusted input is core's checked-out source
+  # and (mitigated below) its install-time lifecycle scripts.
   toolkit-drift:
     name: toolkit drift (advisory, core main)
     runs-on: ubuntu-latest
@@ -143,12 +147,21 @@ jobs:
         with:
           node-version: 22
       - name: Install dependencies
-        run: |
-          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+        run: npm ci --ignore-scripts
       - name: Provision toolkit (deps + operator-loop dist)
+        # AIO-699 / AIO-680 class: this checkout tracks core's floating `main`, so its
+        # lifecycle scripts are unreviewed at install time. --ignore-scripts is verified
+        # safe here: core's package-lock.json pins prebuilt native binaries (e.g.
+        # better-sqlite3 ships prebuilds/, no compile step), and the one script this repo
+        # actually needs — building the operator-loop dist — is run explicitly below via
+        # `npm run build:loop`, which is the same command core's postinstall calls
+        # (scripts/ensure-loop-built.mjs). Verified 2026-08-03: `npm ci --ignore-scripts`
+        # + `npm run build:loop --if-present` against a fresh core main clone, then the
+        # full devtools toolkit-dependent suite (AIOS_TOOLKIT_DIR) — 205 tests, 201 pass,
+        # 0 fail, 4 skipped, identical to the scripts-enabled result.
         working-directory: toolkit-checkout
         run: |
-          npm ci
+          npm ci --ignore-scripts
           # compiled operator loop dist — the spec-eval advisory path loads it via the seam
           npm run build:loop --if-present
       - name: Test
