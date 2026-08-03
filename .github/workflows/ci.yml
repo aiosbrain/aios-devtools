@@ -119,8 +119,10 @@ jobs:
   # fails internally and recreate the exact silent-drift problem this lane exists to catch.
   # See docs/devtools-toolkit-contract.md for the reconcile-then-bump procedure.
   #
-  # Residual risk: permissions are constrained (read-only checkout, no persisted git
-  # credentials, no secrets anywhere in this job), but that does NOT make the lane safe —
+  # Residual risk: permissions are constrained — no repository/user secrets are passed to
+  # floating-core run steps; checkout receives the job's read-only GITHUB_TOKEN, which is
+  # not persisted (persist-credentials: false on both checkouts). That does NOT make the
+  # lane safe on its own —
   # it still runs `npm run build:loop` from floating core, dynamically imports core source,
   # and executes dependency code selected by core's changing lockfile, all with runner
   # network access. timeout-minutes bounds a hung/runaway install or build.

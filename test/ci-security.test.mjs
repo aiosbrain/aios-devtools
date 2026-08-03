@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -143,7 +144,7 @@ test("health upload failures are not retried with a destructive plain upload", (
   );
 });
 
-test("AIO-699 toolkit-drift lane tracks core main, reports failures visibly, and the pinned lane is untouched", () => {
+test("AIO-699: the pinned `unit tests` job is byte-for-byte untouched", () => {
   const pinnedJob = jobBlock(ciWorkflow, "test");
   assert.ok(pinnedJob, "the pinned `test` (unit tests) job must still exist");
   assert.match(
@@ -152,6 +153,27 @@ test("AIO-699 toolkit-drift lane tracks core main, reports failures visibly, and
     "the AIO-685 pin must remain exact-SHA and untouched"
   );
 
+  // A SHA-only check permits arbitrary behavioral drift in the *control* lane (e.g. its
+  // provisioning silently gaining or losing --ignore-scripts) while looking "untouched" —
+  // which defeats the purpose, since this lane is the baseline toolkit-drift is measured
+  // against. Hash the complete, normalized job block instead: any change at all to this
+  // job's contract fails this test loudly and forces a deliberate update of the expected
+  // hash below, alongside a note of what changed and why.
+  //
+  // Intentionally changing the pinned job (including an AIO-685 pin bump)? Recompute with:
+  //   node -e "console.log(require('crypto').createHash('sha256').update(<block>).digest('hex'))"
+  // and update PINNED_JOB_SHA256 in the same PR — never let it drift silently.
+  const actualHash = createHash("sha256").update(pinnedJob).digest("hex");
+  const PINNED_JOB_SHA256 = "eb13c21b5128415734414e1d8d5f656e5c86accd4aa081f5976948139861697f";
+  assert.equal(
+    actualHash,
+    PINNED_JOB_SHA256,
+    "the pinned `test` job's full contract changed — if intentional, update PINNED_JOB_SHA256 " +
+      "in this test in the same PR, with a note of what changed and why"
+  );
+});
+
+test("AIO-699 toolkit-drift lane tracks core main and reports failures visibly", () => {
   const driftJob = jobBlock(ciWorkflow, "toolkit-drift");
   assert.ok(driftJob, "the AIO-699 toolkit-drift job must exist");
 
@@ -160,6 +182,17 @@ test("AIO-699 toolkit-drift lane tracks core main, reports failures visibly, and
   // silent-drift problem AIO-699 exists to fix. Non-blocking status must come from branch
   // protection (the check simply not being required), never from swallowing the failure here.
   assert.doesNotMatch(driftJob, /continue-on-error/, "toolkit-drift must not swallow failures");
+
+  // Same class of failure-swallowing, one level down: a run step can discard a non-zero
+  // exit with a shell construct just as effectively as continue-on-error does at the job
+  // level. None of these may appear anywhere in this job's steps.
+  assert.doesNotMatch(driftJob, /\|\|\s*true\b/, "no `|| true` swallowing a run step's exit code");
+  assert.doesNotMatch(
+    driftJob,
+    /\|\|\s*exit 0\b/,
+    "no `|| exit 0` swallowing a run step's exit code"
+  );
+  assert.doesNotMatch(driftJob, /set \+e/, "no `set +e` disabling errexit in a run step");
 
   // It must track core's floating main, not a SHA — that's what makes it a drift detector
   // rather than a second copy of the pinned lane.
@@ -179,10 +212,19 @@ test("AIO-699 toolkit-drift lane tracks core main, reports failures visibly, and
   assert.equal(executableInstallLines.length, 2);
   assert.doesNotMatch(driftJob, /npm install(?!\s+-g)/, "no unpinned npm install fallback");
 
-  // Job-level blast-radius bounds: read-only checkout permissions and a runaway-run cap.
+  // Job-level blast-radius bounds: read-only checkout permissions and an explicit,
+  // meaningfully-tight runaway-run cap. GitHub's own default is 360 minutes, so accepting
+  // any digit string here (as a prior version of this test did) is weaker than asserting
+  // nothing — require a positive integer no greater than 15.
   assert.match(driftJob, /^    permissions:\n\s+contents: read$/m);
-  assert.match(driftJob, /^    timeout-minutes: \d+$/m);
-  assert.doesNotMatch(driftJob, /secrets\./, "toolkit-drift must never see a secret");
+  const timeoutMatch = driftJob.match(/^ {4}timeout-minutes: (\d+)$/m);
+  assert.ok(timeoutMatch, "toolkit-drift must declare an explicit timeout-minutes");
+  const timeoutMinutes = Number(timeoutMatch[1]);
+  assert.ok(
+    timeoutMinutes > 0 && timeoutMinutes <= 15,
+    `timeout-minutes must be a positive integer <= 15, got ${timeoutMinutes}`
+  );
+  assert.doesNotMatch(driftJob, /secrets\./, "toolkit-drift must never see a repository/user secret");
 });
 
 test("the exact toolkit pin resolves from the public npm registry", () => {
