@@ -112,3 +112,22 @@ Procedure when `toolkit-drift` goes red:
 3. Bump the pin in the `unit tests` job's `Checkout AIOS toolkit` step to the reconciled core
    SHA, in the **same PR** as the reconciliation — never bump the pin alone, and never leave the
    reconciliation stacked behind a separate pin bump.
+
+### Editing `ci.yml` at all means updating the frozen contract
+
+`test/fixtures/ci-workflow-contract.txt` holds every behaviorally meaningful line of
+`.github/workflows/ci.yml`, and `test/ci-security.test.mjs` asserts the two match exactly. Any
+edit to the workflow — including step 3's pin bump — fails that test until the fixture is
+regenerated **in the same PR**:
+
+```bash
+node test/workflow-contract-lib.mjs > test/fixtures/ci-workflow-contract.txt
+```
+
+Read the failing diff before regenerating. This is an allowlist, not a lint rule: it exists
+because shell has unbounded ways to discard a non-zero exit, so the contract asserts the
+commands that ARE allowed to run rather than enumerating the idioms that aren't. It covers the
+whole file rather than individual jobs because adversarial review defeated a per-job version
+twice from outside the jobs — once with a workflow-level `defaults.run.shell` that swallowed
+every step's exit status, once with `|| true` on the confidentiality leak scans, which no
+per-job allowlist covered. A blanket regeneration without reading the diff hands both back.

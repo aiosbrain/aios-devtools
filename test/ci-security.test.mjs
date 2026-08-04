@@ -3,9 +3,14 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  jobBlock,
+  readCiContract,
+  repoRoot as root,
+  significantLines,
+  workflowSteps,
+} from "./workflow-contract-lib.mjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workflowsDir = path.join(root, ".github", "workflows");
 const workflows = new Map(
   readdirSync(workflowsDir)
@@ -14,75 +19,6 @@ const workflows = new Map(
 );
 const ciWorkflow = workflows.get("ci.yml");
 const scanWorkflow = workflows.get("scan-on-merge.yml");
-
-function workflowSteps(workflow) {
-  const lines = workflow.split("\n");
-  const starts = lines.flatMap((line, index) => (/^      - /.test(line) ? [index] : []));
-  return starts.map((start, index) =>
-    lines.slice(start, starts[index + 1] ?? lines.length).join("\n")
-  );
-}
-
-// Top-level job blocks are keyed by a two-space-indented `<name>:` line; the block runs
-// until the next such line (or EOF), minus any trailing blank/comment lines that are
-// actually the lead-in commentary for the *next* job. Used to scope assertions to one job.
-function jobBlock(workflow, jobName) {
-  const lines = workflow.split("\n");
-  const startIndex = lines.findIndex((line) => line === `  ${jobName}:`);
-  if (startIndex === -1) return undefined;
-  const nextTopLevel = lines
-    .slice(startIndex + 1)
-    .findIndex((line) => /^  [A-Za-z0-9_-]+:$/.test(line));
-  let endIndex = nextTopLevel === -1 ? lines.length : startIndex + 1 + nextTopLevel;
-  while (endIndex > startIndex + 1 && /^\s*(#.*)?$/.test(lines[endIndex - 1])) endIndex -= 1;
-  return lines.slice(startIndex, endIndex).join("\n");
-}
-
-// The behaviorally meaningful lines of a job block: blank lines and pure YAML-level comment
-// lines are dropped (order is otherwise preserved as-is, so a key reorder or a name/runs-on
-// swap still shows up as a diff — only comment-only edits and blank-line noise are ignored).
-// Used for exact-match "allowlist" assertions instead of scanning for individual forbidden
-// substrings — shell has unbounded ways to discard a non-zero exit (`|| :`, `; true`,
-// `if ! cmd; then :; fi`, trailing `exit 0`, ...); asserting the one command that is allowed
-// to run, verbatim, catches all of them by construction instead of requiring a new blacklist
-// rule per idiom.
-//
-// Comment leniency stops at the boundary of a `run: |`/`run: >` block scalar. GitHub Actions
-// expands `${{ ... }}` expressions into the script text *before* the shell ever parses it, so
-// a `#`-prefixed line inside `run:` is not inert the way a YAML comment is — an expression
-// built from untrusted input (e.g. `${{ github.event.pull_request.body }}`) can contain a
-// newline that breaks out of the "comment" and executes. Every line inside an active run
-// block is therefore treated as significant, comment-shaped or not; only lines outside any
-// run block get comment/blank leniency.
-function significantLines(block) {
-  const lines = block.split("\n");
-  const result = [];
-  let runBlockIndent = null; // set while inside a `run: |`/`run: >` block scalar
-  for (const rawLine of lines) {
-    const line = rawLine.replace(/\s+$/, "");
-    const indent = line.match(/^(\s*)/)[1].length;
-
-    if (runBlockIndent !== null) {
-      if (line.trim() === "") continue; // blank lines don't end a YAML block scalar
-      if (indent > runBlockIndent) {
-        result.push(line); // inside the run body — always significant, comments included
-        continue;
-      }
-      runBlockIndent = null; // dedented back out of the block scalar
-    }
-
-    const runStart = line.match(/^(\s*)run:\s*[|>][+-]?\s*$/);
-    if (runStart) {
-      result.push(line);
-      runBlockIndent = runStart[1].length;
-      continue;
-    }
-
-    if (line.trim() === "" || line.trim().startsWith("#")) continue; // YAML-level comment
-    result.push(line);
-  }
-  return result;
-}
 
 test("all workflows SHA-pin third-party Actions and every checkout drops credentials", () => {
   let externalActionCount = 0;
@@ -189,53 +125,13 @@ test("health upload failures are not retried with a destructive plain upload", (
   );
 });
 
-// AIO-699: the pin this whole lane exists to police. Named once so the SHA assertion below,
-// the bump instructions, and PINNED_JOB_LINES all point at the same single source of truth —
-// bumping the pin (per docs/devtools-toolkit-contract.md's reconcile-then-bump procedure)
-// means updating THIS constant and the matching `ref:` line inside PINNED_JOB_LINES together,
-// in the same PR. Never let the two drift apart.
+// AIO-699: the pin this whole lane exists to police. Named once so the SHA assertion below
+// and the bump instructions point at the same single source of truth — bumping the pin (per
+// docs/devtools-toolkit-contract.md's reconcile-then-bump procedure) means updating THIS
+// constant AND the `ref:` line in the frozen workflow contract together, in the same PR.
+// Neither one alone passes: change only the constant and this test fails; change only the
+// workflow and the contract test below fails.
 const PINNED_TOOLKIT_SHA = "a48356602eb73c41b6945de8211aabc4064e8a65";
-
-// AIO-699: the pinned `unit tests` job is the baseline toolkit-drift is measured against.
-// Comparing only its pin SHA lets its *behavior* drift silently (e.g. its provisioning
-// quietly gaining/losing --ignore-scripts) while looking untouched. Assert the properties
-// that actually matter, then back them with a readable line-by-line snapshot — a diff of
-// what changed, not an opaque hash two people have to trust blindly.
-const PINNED_JOB_LINES = [
-  "  test:",
-  "    name: unit tests",
-  "    runs-on: ubuntu-latest",
-  "    permissions:",
-  "      contents: read",
-  "    steps:",
-  "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
-  "        with:",
-  "          persist-credentials: false",
-  "      - name: Checkout AIOS toolkit",
-  "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
-  "        with:",
-  "          repository: aiosbrain/aios-workspace",
-  `          ref: ${PINNED_TOOLKIT_SHA}`,
-  "          path: toolkit-checkout",
-  "          persist-credentials: false",
-  "      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
-  "        with:",
-  "          node-version: 22",
-  "      - name: Install dependencies",
-  "        run: |",
-  '          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi',
-  "      - name: Provision toolkit (deps + operator-loop dist)",
-  "        working-directory: toolkit-checkout",
-  "        run: |",
-  "          npm ci",
-  "          # compiled operator loop dist — the spec-eval advisory path loads it via the seam",
-  "          npm run build:loop --if-present",
-  "      - name: Test",
-  "        env:",
-  "          AIOS_TOOLKIT_DIR: ${{ github.workspace }}/toolkit-checkout",
-  "        run: |",
-  '          if [ -f package.json ]; then npm run test --if-present; else echo "no package.json — skipping tests"; fi',
-];
 
 test("AIO-699: the pinned `unit tests` job's contract is unchanged", () => {
   const pinnedJob = jobBlock(ciWorkflow, "test");
@@ -271,74 +167,64 @@ test("AIO-699: the pinned `unit tests` job's contract is unchanged", () => {
     /^          if \[ -f package\.json \]; then npm run test --if-present; else echo "no package\.json — skipping tests"; fi$/m,
     "unconditional test invocation unchanged"
   );
+});
 
-  // Readable snapshot, not a hash: on mismatch, Node prints the actual line-by-line diff
-  // against PINNED_JOB_LINES above, so a reviewer sees exactly what changed. If a change is
-  // intentional (including an AIO-685 pin bump), update PINNED_JOB_LINES in the same PR —
-  // copy the new lines straight out of this assertion's failure output.
-  assert.deepEqual(
-    significantLines(pinnedJob),
-    PINNED_JOB_LINES,
-    "the pinned `test` job changed — if intentional, paste the new lines from this diff into " +
-      "PINNED_JOB_LINES in the same PR, with a note of what changed and why"
+test("AIO-699: the toolkit-drift lane tracks core main and is bounded", () => {
+  const driftJob = jobBlock(ciWorkflow, "toolkit-drift");
+  assert.ok(driftJob, "the AIO-699 toolkit-drift job must exist");
+  assert.match(driftJob, /^          ref: main$/m, "the drift lane must track core main, never a pin");
+  assert.match(driftJob, /repository: aiosbrain\/aios-workspace/, "checkout target unchanged");
+  assert.match(
+    driftJob,
+    /^    timeout-minutes: 15$/m,
+    "a lane that installs and builds from floating core must stay bounded"
+  );
+  assert.match(
+    driftJob,
+    /^        run: npm ci --ignore-scripts$/m,
+    "floating core's install-time lifecycle scripts are unreviewed and must stay disabled"
   );
 });
 
-// AIO-699: the toolkit-drift job's steps, verbatim. This is an allowlist, not a blacklist —
-// any mutation to a run command, checkout target, or job setting produces a line that no
-// longer matches one of these, so it fails by construction. That's what makes it catch
-// idioms nobody has enumerated yet (`|| :`, `; true`, `if ! cmd; then :; fi`, a trailing
-// `exit 0`, ...) instead of requiring a new forbidden-substring rule per idiom discovered.
-const TOOLKIT_DRIFT_LINES = [
-  "  toolkit-drift:",
-  "    name: toolkit drift (advisory, core main)",
-  "    runs-on: ubuntu-latest",
-  "    timeout-minutes: 15",
-  "    permissions:",
-  "      contents: read",
-  "    steps:",
-  "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
-  "        with:",
-  "          persist-credentials: false",
-  "      - name: Checkout AIOS toolkit",
-  "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
-  "        with:",
-  "          repository: aiosbrain/aios-workspace",
-  "          ref: main",
-  "          path: toolkit-checkout",
-  "          persist-credentials: false",
-  "      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
-  "        with:",
-  "          node-version: 22",
-  "      - name: Install dependencies",
-  "        run: npm ci --ignore-scripts",
-  "      - name: Provision toolkit (deps + operator-loop dist)",
-  "        working-directory: toolkit-checkout",
-  "        run: |",
-  "          npm ci --ignore-scripts",
-  "          # compiled operator loop dist — the spec-eval advisory path loads it via the seam",
-  "          npm run build:loop --if-present",
-  "      - name: Test",
-  "        env:",
-  "          AIOS_TOOLKIT_DIR: ${{ github.workspace }}/toolkit-checkout",
-  "        run: |",
-  '          if [ -f package.json ]; then npm run test --if-present; else echo "no package.json — skipping tests"; fi',
-];
-
-test("AIO-699 toolkit-drift lane matches its allowlisted steps exactly", () => {
-  const driftJob = jobBlock(ciWorkflow, "toolkit-drift");
-  assert.ok(driftJob, "the AIO-699 toolkit-drift job must exist");
-
-  // Exact-match allowlist on every behaviorally meaningful line in the job. This is
-  // strictly stronger than scanning for forbidden substrings (continue-on-error, `|| true`,
-  // `|| exit 0`, `set +e`, ...): none of those substrings need to be enumerated here,
-  // because any of them — or any other exit-swallowing idiom — changes a run-step line
-  // away from what TOOLKIT_DRIFT_LINES says is the only thing allowed to run.
+/**
+ * THE CONTRACT. Every behaviorally meaningful line of ci.yml, frozen.
+ *
+ * This is one exact-match allowlist over the WHOLE FILE, and it replaced two per-job
+ * allowlists that adversarial review defeated at e5b2053 — not by finding a hole inside
+ * either job, but by changing things outside them:
+ *
+ *   - `defaults: {run: {shell: bash -c 'bash "$0" || true' {0}}}` at WORKFLOW level. GitHub
+ *     applies that to every `run` step in every job, so it swallowed a script exiting 23 in
+ *     both allowlisted jobs while changing nothing inside either job block. PyYAML and
+ *     actionlint both accepted it and the whole suite stayed green.
+ *   - `|| true` appended to both confidentiality leak scans in `gates`, a job no allowlist
+ *     covered at all — leaving the security gate free to report success after finding
+ *     confidential material. Also green.
+ *   - the same trick on `lint`, `test-no-toolkit` and `pack-verify`, all likewise uncovered.
+ *
+ * The fix is NOT a forbidden-substring rule for `defaults:`/`shell:`. That is the same
+ * blacklist mistake one level up, over a syntax (GitHub's) this repo neither controls nor
+ * can exhaust — and enumerating bad inputs is exactly what this contract was inverted away
+ * from in the first place. The fix is scope: allowlist the entire file, so any behaviorally
+ * meaningful line ANYWHERE — top-level keys included — has to be in the frozen contract.
+ *
+ * Cost: an intentional ci.yml edit must update test/fixtures/ci-workflow-contract.txt in the
+ * same PR. That is the point. Regenerate with
+ *
+ *     node test/workflow-contract-lib.mjs > test/fixtures/ci-workflow-contract.txt
+ *
+ * and read the diff before you do — this file is the only thing between a swallowed exit
+ * status and a green check.
+ */
+test("every behaviorally meaningful line of ci.yml matches the frozen contract", () => {
   assert.deepEqual(
-    significantLines(driftJob),
-    TOOLKIT_DRIFT_LINES,
-    "toolkit-drift's steps no longer match the allowlisted contract — if intentional, paste " +
-      "the new lines from this diff into TOOLKIT_DRIFT_LINES in the same PR"
+    significantLines(ciWorkflow),
+    readCiContract(),
+    "ci.yml no longer matches test/fixtures/ci-workflow-contract.txt. Read this diff line by " +
+      "line: anything that changes what a step RUNS, or how its exit status is interpreted " +
+      "(defaults, shell, continue-on-error, a swallowed exit), is a security change. If every " +
+      "changed line is intended, regenerate the fixture in this same PR with " +
+      "`node test/workflow-contract-lib.mjs > test/fixtures/ci-workflow-contract.txt`."
   );
 });
 

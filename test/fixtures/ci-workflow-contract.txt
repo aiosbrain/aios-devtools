@@ -1,0 +1,160 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  gates:
+    name: governance gates (size + boundaries + leak)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: File-size gate (default-deny, ratchet-only-down)
+        run: node scripts/check-file-size.mjs
+      - name: Repo-boundary gate
+        run: node scripts/check-boundaries.mjs
+      - name: Baseline confidentiality leak gate
+        env:
+          AIOS_LEAK_TERMS_B64: ""
+        run: bash scripts/leak-gate.sh .
+      - name: Assert private leak terms present on protected main (fail closed)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          HAS_LEAK_TERMS: ${{ secrets.AIOS_LEAK_TERMS_B64 != '' }}
+        run: |
+          if [ "$HAS_LEAK_TERMS" != "true" ]; then
+            echo "::error::AIOS_LEAK_TERMS_B64 repo secret is missing or empty — the confidential-identifier sweep cannot run, and a baseline-only pass must not look green on trusted events. Reinstall the secret (Settings > Secrets and variables > Actions) from the sanctioned local term file."
+            exit 1
+          fi
+          echo "leak-gate term secret present — the identifier sweep will run."
+      - name: Private confidentiality term scan on protected main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          AIOS_LEAK_TERMS_B64: ${{ secrets.AIOS_LEAK_TERMS_B64 }}
+        run: bash scripts/leak-gate.sh .
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+      - name: Lint
+        run: |
+          if [ -f package.json ]; then npm run lint --if-present; else echo "no package.json — skipping lint"; fi
+  test:
+    name: unit tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checkout AIOS toolkit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: aiosbrain/aios-workspace
+          ref: a48356602eb73c41b6945de8211aabc4064e8a65
+          path: toolkit-checkout
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+      - name: Provision toolkit (deps + operator-loop dist)
+        working-directory: toolkit-checkout
+        run: |
+          npm ci
+          # compiled operator loop dist — the spec-eval advisory path loads it via the seam
+          npm run build:loop --if-present
+      - name: Test
+        env:
+          AIOS_TOOLKIT_DIR: ${{ github.workspace }}/toolkit-checkout
+        run: |
+          if [ -f package.json ]; then npm run test --if-present; else echo "no package.json — skipping tests"; fi
+  toolkit-drift:
+    name: toolkit drift (advisory, core main)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checkout AIOS toolkit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: aiosbrain/aios-workspace
+          ref: main
+          path: toolkit-checkout
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Provision toolkit (deps + operator-loop dist)
+        working-directory: toolkit-checkout
+        run: |
+          npm ci --ignore-scripts
+          # compiled operator loop dist — the spec-eval advisory path loads it via the seam
+          npm run build:loop --if-present
+      - name: Test
+        env:
+          AIOS_TOOLKIT_DIR: ${{ github.workspace }}/toolkit-checkout
+        run: |
+          if [ -f package.json ]; then npm run test --if-present; else echo "no package.json — skipping tests"; fi
+  test-no-toolkit:
+    name: tests (no toolkit)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci
+      - name: Test without a toolkit (AIOS_TOOLKIT_DIR unset)
+        run: npm test
+  pack-verify:
+    name: pack and install verification
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci
+      - name: Pack, verify tarball contents, install into a temp project, run the bin
+        run: node --test --test-force-exit test/pack-install.test.mjs
