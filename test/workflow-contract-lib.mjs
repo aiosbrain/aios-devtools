@@ -97,7 +97,19 @@ export function significantLines(block) {
     const indent = line.match(/^[ \t]*/)[0].length;
 
     if (runBlockIndent !== null) {
-      if (ASCII_BLANK.test(line)) continue; // blank lines don't end a YAML block scalar
+      // A blank line does not end a block scalar — but it is NOT insignificant inside one, so it
+      // is RECORDED rather than skipped. Adversarial review demonstrated why at 9aa41e7: in a
+      // FOLDED scalar (`run: >`) a blank line controls line folding, so adding one turned
+      // `echo one echo two` into `echo one\necho two` — two commands where there was one —
+      // while PyYAML and actionlint both accepted the file and the contract stayed green:
+      //   workflow: 6563686f206f6e650a6563686f2074776f0a  ->  echo one\necho two\n
+      //   fixture:  6563686f206f6e65206563686f2074776f0a  ->  echo one echo two\n
+      // In a literal scalar (`run: |`) the same edit adds an LF to the script. Both are changes
+      // to what bash receives, so both have to show up as a changed line.
+      if (ASCII_BLANK.test(line)) {
+        result.push(line);
+        continue;
+      }
       if (indent > runBlockIndent) {
         result.push(line); // inside the run body — always significant, comments included
         continue;
