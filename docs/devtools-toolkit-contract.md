@@ -73,8 +73,11 @@ the fix (`npm run build:loop` in the toolkit) and evaluates with an empty decisi
   actionable locator error, not `ERR_MODULE_NOT_FOUND`.
 - `@anthropic-ai/sdk` declared in the devtools `package.json` (bare import in
   `ship/runtime.mjs`; rehearsal F8) and `@aiosbrain/foundation` for the hub imports.
-- Open pre-cut items tracked from the rehearsal: F2 (`promote.mjs` → leaf extraction), F7
-  (copy-set duplicates + convergence deadlines), F9 (target-repo push mechanics).
+- Open pre-cut items tracked from the rehearsal: F2 (`promote.mjs` → leaf extraction), F9
+  (target-repo push mechanics). F7 (copy-set duplicates) is now tracked as ongoing backlog
+  under Linear AIO-663 — see `docs/copy-ledger.md`. Its **convergence deadline was dropped**
+  on 2026-08-03 by the repo owner; the obligation to give every copy a terminal disposition
+  remains, but there is no expiry to enforce.
 
 ## Boundary gate
 

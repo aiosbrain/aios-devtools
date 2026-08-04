@@ -5,29 +5,42 @@ The 17 temporary copies carried into this repo by the AIO-594 cut (source:
 for the cut-time notes). Table copied from the AIO-594 devtools canonicalization and
 removal specification ("Temporary Copy Convergence").
 
-Every item must receive one terminal disposition: foundation export, Devtools ownership
-with core deletion, intentional core ownership with Devtools consumption through the
-toolkit seam, or an explicitly approved new deadline.
+**There is no convergence deadline.** The original 7-day deadline from the 2026-07-31
+cut push was dropped by explicit decision of the repo owner (John Ellison) on
+2026-08-03. Convergence is now tracked as ordinary backlog under **Linear AIO-663**,
+with no expiry. Every item must still receive one terminal disposition: foundation
+export, Devtools ownership with core deletion, or intentional core ownership with
+Devtools consumption through the toolkit seam.
+
+Dropping the deadline removed the timebox, **not the obligation**. Every row below is
+still `unresolved` — it is de-timeboxed backlog, not work in flight. A row advances to
+`in-progress` only when someone is actually executing it, so that a status read of this
+table cannot overstate how much is underway.
+
+**AIO-663 is the umbrella tracker** for the ledger as a whole. Individual rows may carry
+a more specific issue that executes that row's work: row 13 is owned by **AIO-686**, and
+row 1 is entangled with **AIO-684** (the CLI marker tokens defined in `relay-core.mjs`).
+Reporting on AIO-663 alone therefore understates the ledger — read the Linear column.
 
 | # | Temporary copy | Required disposition | Status | Linear issue |
 |---|----------------|----------------------|--------|--------------|
-| 1 | `scripts/relay-core.mjs` | foundation export or Devtools-owned | unresolved | TBD |
-| 2 | `scripts/model-call.mjs` | foundation model-dispatch export | unresolved | TBD |
-| 3 | `scripts/loop-models.mjs` | foundation model-dispatch export | unresolved | TBD |
-| 4 | `scripts/model-providers.mjs` | foundation model-dispatch export | unresolved | TBD |
-| 5 | `scripts/pr.mjs` | foundation GitHub-plumbing export | unresolved | TBD |
-| 6 | `scripts/skill-context.mjs` | foundation skill-context export | unresolved | TBD |
-| 7 | `scripts/cli-common.mjs` | foundation CLI-plumbing export | unresolved | TBD |
-| 8 | `scripts/ui/output-context.mjs` | foundation CLI-plumbing export | unresolved | TBD |
-| 9 | `scripts/severity.mjs` | foundation severity export | unresolved | TBD |
-| 10 | `scripts/verify-cmd.mjs` | foundation verification-command export | unresolved | TBD |
-| 11 | `scripts/spec-checks.mjs` | foundation deterministic-spec export | unresolved | TBD |
-| 12 | `scripts/spec-checks/deterministic.mjs` | move with spec-checks export | unresolved | TBD |
-| 13 | `scripts/spec-checks/rubric.mjs` | move with spec-checks; replace module-relative rubric fallback with toolkit resolution | unresolved | TBD |
-| 14 | `scripts/spec-checks/spec-text.mjs` | move with spec-checks export | unresolved | TBD |
-| 15 | `scripts/scan-file.mjs` | foundation scan export | unresolved | TBD |
-| 16 | `scripts/toolkit-locate.mjs` | foundation locator export or separately versioned identical contract implementation | unresolved | TBD |
-| 17 | `docs/devtools-toolkit-contract.md` | Devtools canonical; Workspace retains a short consumer contract/link | unresolved | TBD |
+| 1 | `scripts/relay-core.mjs` | foundation export or Devtools-owned | unresolved | AIO-663 (entangled with AIO-684) |
+| 2 | `scripts/model-call.mjs` | foundation model-dispatch export | unresolved | AIO-663 |
+| 3 | `scripts/loop-models.mjs` | foundation model-dispatch export | unresolved | AIO-663 |
+| 4 | `scripts/model-providers.mjs` | foundation model-dispatch export | unresolved | AIO-663 |
+| 5 | `scripts/pr.mjs` | foundation GitHub-plumbing export | unresolved | AIO-663 |
+| 6 | `scripts/skill-context.mjs` | foundation skill-context export | unresolved | AIO-663 |
+| 7 | `scripts/cli-common.mjs` | foundation CLI-plumbing export | unresolved | AIO-663 |
+| 8 | `scripts/ui/output-context.mjs` | foundation CLI-plumbing export | unresolved | AIO-663 |
+| 9 | `scripts/severity.mjs` | foundation severity export | unresolved | AIO-663 |
+| 10 | `scripts/verify-cmd.mjs` | foundation verification-command export | unresolved | AIO-663 |
+| 11 | `scripts/spec-checks.mjs` | foundation deterministic-spec export | unresolved | AIO-663 |
+| 12 | `scripts/spec-checks/deterministic.mjs` | move with spec-checks export | unresolved | AIO-663 |
+| 13 | `scripts/spec-checks/rubric.mjs` | move with spec-checks; replace module-relative rubric fallback with toolkit resolution | unresolved | AIO-686 |
+| 14 | `scripts/spec-checks/spec-text.mjs` | move with spec-checks export | unresolved | AIO-663 |
+| 15 | `scripts/scan-file.mjs` | foundation scan export | unresolved | AIO-663 |
+| 16 | `scripts/toolkit-locate.mjs` | foundation locator export or separately versioned identical contract implementation | unresolved | AIO-663 |
+| 17 | `docs/devtools-toolkit-contract.md` | Devtools canonical; Workspace retains a short consumer contract/link | unresolved | AIO-663 |
 
 Governance-stamp files (`scripts/check-file-size.mjs`, `scripts/check-boundaries.mjs`,
 `scripts/git-files.mjs`, `scripts/leak-gate.sh`, `validation/agent-readiness-lib.mjs`,
@@ -35,7 +48,8 @@ Governance-stamp files (`scripts/check-file-size.mjs`, `scripts/check-boundaries
 the stamp and are **not** part of this copy ledger.
 
 Status values: `unresolved` → `in-progress` → one of `foundation-export` /
-`devtools-owned` / `core-owned-via-seam` / `re-deadlined (<date, approval ref>)`.
-Fill the Linear issue column as owning issues are created; each row's terminal
-disposition needs byte/behavior parity evidence where applicable (spec: Acceptance
-Criteria).
+`devtools-owned` / `core-owned-via-seam`. The prior `re-deadlined (<date, approval
+ref>)` status is **retired**: there is no deadline left to redeclare against, so this
+status no longer applies and should not be used. Fill the Linear issue column as owning
+issues are created; each row's terminal disposition needs byte/behavior parity evidence
+where applicable (spec: Acceptance Criteria).
