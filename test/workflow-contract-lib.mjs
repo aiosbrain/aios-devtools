@@ -53,7 +53,7 @@ export function jobBlock(workflow, jobName) {
     .slice(startIndex + 1)
     .findIndex((line) => /^  [A-Za-z0-9_-]+:$/.test(line));
   let endIndex = nextTopLevel === -1 ? lines.length : startIndex + 1 + nextTopLevel;
-  while (endIndex > startIndex + 1 && /^\s*(#.*)?$/.test(lines[endIndex - 1])) endIndex -= 1;
+  while (endIndex > startIndex + 1 && /^[ \t]*(#.*)?$/.test(lines[endIndex - 1])) endIndex -= 1;
   return lines.slice(startIndex, endIndex).join("\n");
 }
 
@@ -76,16 +76,28 @@ export function jobBlock(workflow, jobName) {
 // those spellings is itself a changed line, so the comparison fails on the header before the
 // leniency question ever arises. Verified against PyYAML and actionlint for all six
 // spellings. Narrow the file's scope again and this becomes a real hole.
+//
+// LINES ARE COMPARED VERBATIM. There is no trailing-whitespace strip, and "blank" and
+// "comment" are judged with ASCII space and tab only — never `\s` or `.trim()`, both of which
+// are Unicode-wide. Adversarial review defeated the Unicode-wide version at 040e60b: appending
+// U+1680 OGHAM SPACE MARK to an inline `run:` command was accepted by both PyYAML and
+// actionlint and CHANGED THE EXECUTED ARGV — bash does not treat U+1680 as a separator, so npm
+// received it as part of the argument and failed — yet the contract stayed green, because
+// `/\s+$/` had trimmed the character away before the comparison ever happened. Any line that
+// gains a character, whitespace-looking or not, is now a changed line that must be re-frozen
+// deliberately.
+const ASCII_BLANK = /^[ \t]*$/;
+const ASCII_COMMENT = /^[ \t]*#/;
+
 export function significantLines(block) {
   const lines = block.split("\n");
   const result = [];
   let runBlockIndent = null; // set while inside a `run: |`/`run: >` block scalar
-  for (const rawLine of lines) {
-    const line = rawLine.replace(/\s+$/, "");
-    const indent = line.match(/^(\s*)/)[1].length;
+  for (const line of lines) {
+    const indent = line.match(/^[ \t]*/)[0].length;
 
     if (runBlockIndent !== null) {
-      if (line.trim() === "") continue; // blank lines don't end a YAML block scalar
+      if (ASCII_BLANK.test(line)) continue; // blank lines don't end a YAML block scalar
       if (indent > runBlockIndent) {
         result.push(line); // inside the run body — always significant, comments included
         continue;
@@ -93,14 +105,14 @@ export function significantLines(block) {
       runBlockIndent = null; // dedented back out of the block scalar
     }
 
-    const runStart = line.match(/^(\s*)run:\s*[|>][+-]?\s*$/);
+    const runStart = line.match(/^([ \t]*)run:[ \t]*[|>][+-]?[ \t]*$/);
     if (runStart) {
       result.push(line);
       runBlockIndent = runStart[1].length;
       continue;
     }
 
-    if (line.trim() === "" || line.trim().startsWith("#")) continue; // YAML-level comment
+    if (ASCII_BLANK.test(line) || ASCII_COMMENT.test(line)) continue; // YAML-level comment
     result.push(line);
   }
   return result;
