@@ -1,18 +1,11 @@
-# CI skeleton seeded by `aios repo-bootstrap` (AIO-602). This repo owns it from here —
-# the bootstrap never overwrites an existing ci.yml. The governance-gates job mirrors
-# the aios-workspace invariants (ENGINEERING-CONSTITUTION.md §8): file-size cap,
-# repo-boundary seams, and the confidentiality leak gate.
 name: ci
-
 on:
   pull_request:
   push:
     branches: [main]
-
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   gates:
     name: governance gates (size + boundaries + leak)
@@ -31,8 +24,6 @@ jobs:
       - name: Repo-boundary gate
         run: node scripts/check-boundaries.mjs
       - name: Baseline confidentiality leak gate
-        # PR-controlled code never receives the private term dictionary. The always-on shape
-        # rules still catch generic credentials and machine-specific paths on every event.
         env:
           AIOS_LEAK_TERMS_B64: ""
         run: bash scripts/leak-gate.sh .
@@ -51,7 +42,6 @@ jobs:
         env:
           AIOS_LEAK_TERMS_B64: ${{ secrets.AIOS_LEAK_TERMS_B64 }}
         run: bash scripts/leak-gate.sh .
-
   lint:
     name: lint
     runs-on: ubuntu-latest
@@ -80,16 +70,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Toolkit-dependent suites resolve core-owned content (spec rubric, delivery skill
-      # suite, validation/ gate tree) and the stays-core seam engines through a real AIOS
-      # toolkit checkout (docs/devtools-toolkit-contract.md): without AIOS_TOOLKIT_DIR
-      # they skip with a named reason by design — this checkout makes them run.
       - name: Checkout AIOS toolkit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: aiosbrain/aios-workspace
-          # AIO-685 contract pin: current core candidate, including corrected SR18 semantics.
-          # Keep exact-SHA pinned so the CI input is reproducible; bumps must reconcile drift.
           ref: a48356602eb73c41b6945de8211aabc4064e8a65
           path: toolkit-checkout
           persist-credentials: false
@@ -111,21 +95,6 @@ jobs:
         run: |
           if [ -f package.json ]; then npm run test --if-present; else echo "no package.json — skipping tests"; fi
 
-  # AIO-699 — advisory-only lane: mirrors the `unit tests` job above but resolves the
-  # toolkit checkout against core `main` instead of the AIO-685 pin, so pin drift shows up
-  # here (red) well before it silently rots the pinned lane. Non-blocking status MUST come
-  # from branch protection (this check simply is not in the required set) — not from
-  # `continue-on-error`, which would report green at the check level even when the job
-  # fails internally and recreate the exact silent-drift problem this lane exists to catch.
-  # See docs/devtools-toolkit-contract.md for the reconcile-then-bump procedure.
-  #
-  # Residual risk: permissions are constrained — no repository/user secrets are passed to
-  # floating-core run steps; checkout receives the job's read-only GITHUB_TOKEN, which is
-  # not persisted (persist-credentials: false on both checkouts). That does NOT make the
-  # lane safe on its own —
-  # it still runs `npm run build:loop` from floating core, dynamically imports core source,
-  # and executes dependency code selected by core's changing lockfile, all with runner
-  # network access. timeout-minutes bounds a hung/runaway install or build.
   toolkit-drift:
     name: toolkit drift (advisory, core main)
     runs-on: ubuntu-latest
@@ -136,16 +105,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Toolkit-dependent suites resolve core-owned content (spec rubric, delivery skill
-      # suite, validation/ gate tree) and the stays-core seam engines through a real AIOS
-      # toolkit checkout (docs/devtools-toolkit-contract.md): without AIOS_TOOLKIT_DIR
-      # they skip with a named reason by design — this checkout makes them run.
       - name: Checkout AIOS toolkit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: aiosbrain/aios-workspace
-          # AIO-699: track core main directly (never a pin) so drift from the AIO-685 pin
-          # surfaces here first, not silently on the pinned lane.
           ref: main
           path: toolkit-checkout
           persist-credentials: false
@@ -155,21 +118,6 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
       - name: Provision toolkit (deps + operator-loop dist)
-        # AIO-699 / AIO-680 class: this checkout tracks core's floating `main`, so its
-        # install-time lifecycle scripts are unreviewed. --ignore-scripts removes that one
-        # vector (confirmed no functional loss: core's package-lock.json pins prebuilt
-        # native binaries — e.g. better-sqlite3 ships prebuilds/, no compile step — and the
-        # one script this repo actually needs, building the operator-loop dist, is run
-        # explicitly below via `npm run build:loop`, the same call core's postinstall makes
-        # via scripts/ensure-loop-built.mjs). Verified 2026-08-03: `npm ci --ignore-scripts`
-        # + `npm run build:loop --if-present` against a fresh core main clone, then the full
-        # devtools toolkit-dependent suite (AIOS_TOOLKIT_DIR) — 205 tests, 201 pass, 0 fail,
-        # 4 skipped, identical to the scripts-enabled result.
-        # This does NOT make the step safe overall: `npm run build:loop` still executes
-        # arbitrary TypeScript/JS from floating core, and the subsequent Test step
-        # dynamically imports core source and runs dependency code selected by core's
-        # changing lockfile, with full runner network access. timeout-minutes on the job
-        # bounds a hung/runaway run; there is no sandboxing beyond that here.
         working-directory: toolkit-checkout
         run: |
           npm ci --ignore-scripts
@@ -181,9 +129,6 @@ jobs:
         run: |
           if [ -f package.json ]; then npm run test --if-present; else echo "no package.json — skipping tests"; fi
 
-  # AIO-594 PR A — the no-toolkit behavior lane: proves the package is standalone-green
-  # (seam-dependent suites skip with a NAMED reason, never crash) exactly as a fresh
-  # `npm install @aiosbrain/aios-devtools` consumer without a workspace would see it.
   test-no-toolkit:
     name: tests (no toolkit)
     runs-on: ubuntu-latest
@@ -200,10 +145,6 @@ jobs:
         run: npm ci
       - name: Test without a toolkit (AIOS_TOOLKIT_DIR unset)
         run: npm test
-
-  # AIO-594 PR A — clean production install + package verification: npm pack, assert the
-  # files allowlist, install the tarball into a fresh temp project, run the installed
-  # `aios-devtools` bin and resolve the exports map (test/pack-install.test.mjs).
   pack-verify:
     name: pack and install verification
     runs-on: ubuntu-latest

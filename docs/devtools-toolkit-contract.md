@@ -86,3 +86,48 @@ devtools; devtools → core is allowed). The seam's non-literal
 `import(pathToFileURL(join(toolkitRoot, …)))` is deliberately outside the gate's literal-import
 parser; the guarantee that devtools files carry **no static or literal-dynamic imports** of the
 stays-core engine set is enforced by `test/devtools-seam.test.mjs` instead.
+
+## The pin drifts silently unless something checks it (AIO-699)
+
+The `unit tests` job's toolkit checkout is pinned to an exact core SHA (see the `# AIO-685
+contract pin` comment on that step). That pin is what makes the lane reproducible, but it is
+also exactly what let the pinned lane stay green while devtools-against-real-core drifted
+unnoticed (AIO-685) — bumping the pin once doesn't remove that mechanism, it just resets the
+clock.
+
+`ci.yml` also runs `toolkit-drift`: the same suite, same `AIOS_TOOLKIT_DIR` wiring, checked out
+against `aiosbrain/aios-workspace@main` instead of the pin. It reports failures the same way any
+other job does — no `continue-on-error`, no swallowed exit code — because a check that goes
+green regardless of what happened inside it is exactly the silent-drift failure mode this lane
+exists to catch. Its non-blocking status comes entirely from **branch protection**: the check is
+deliberately left out of the required-status-checks set, so it can go red without blocking a
+merge, and a maintainer has to look at it rather than rely on a green PR page.
+
+Procedure when `toolkit-drift` goes red:
+
+1. Read its failure — it means core `main` has moved in a way the pinned devtools suites don't
+   yet handle (same shape as the AIO-685 SR18 drift).
+2. Reconcile the drift in devtools (update the affected suite/consumer to match core's current
+   contract), the same way AIO-685 did.
+3. Bump the pin in the `unit tests` job's `Checkout AIOS toolkit` step to the reconciled core
+   SHA, in the **same PR** as the reconciliation — never bump the pin alone, and never leave the
+   reconciliation stacked behind a separate pin bump.
+
+### Editing `ci.yml` at all means updating the frozen contract
+
+`test/fixtures/ci-workflow-contract.txt` holds every behaviorally meaningful line of
+`.github/workflows/ci.yml`, and `test/ci-security.test.mjs` asserts the two match exactly. Any
+edit to the workflow — including step 3's pin bump — fails that test until the fixture is
+regenerated **in the same PR**:
+
+```bash
+node test/workflow-contract-lib.mjs > test/fixtures/ci-workflow-contract.txt
+```
+
+Read the failing diff before regenerating. This is an allowlist, not a lint rule: it exists
+because shell has unbounded ways to discard a non-zero exit, so the contract asserts the
+commands that ARE allowed to run rather than enumerating the idioms that aren't. It covers the
+whole file rather than individual jobs because adversarial review defeated a per-job version
+twice from outside the jobs — once with a workflow-level `defaults.run.shell` that swallowed
+every step's exit status, once with `|| true` on the confidentiality leak scans, which no
+per-job allowlist covered. A blanket regeneration without reading the diff hands both back.

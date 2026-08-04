@@ -3,9 +3,14 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  jobBlock,
+  readCiContract,
+  repoRoot as root,
+  significantLines,
+  workflowSteps,
+} from "./workflow-contract-lib.mjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workflowsDir = path.join(root, ".github", "workflows");
 const workflows = new Map(
   readdirSync(workflowsDir)
@@ -14,14 +19,6 @@ const workflows = new Map(
 );
 const ciWorkflow = workflows.get("ci.yml");
 const scanWorkflow = workflows.get("scan-on-merge.yml");
-
-function workflowSteps(workflow) {
-  const lines = workflow.split("\n");
-  const starts = lines.flatMap((line, index) => (/^      - /.test(line) ? [index] : []));
-  return starts.map((start, index) =>
-    lines.slice(start, starts[index + 1] ?? lines.length).join("\n")
-  );
-}
 
 test("all workflows SHA-pin third-party Actions and every checkout drops credentials", () => {
   let externalActionCount = 0;
@@ -125,6 +122,109 @@ test("health upload failures are not retried with a destructive plain upload", (
   assert.doesNotMatch(
     scanWorkflow,
     /scan_with_health\.py[\s\S]*?\|\|\s+python -m aios_ingest\.cli scan/
+  );
+});
+
+// AIO-699: the pin this whole lane exists to police. Named once so the SHA assertion below
+// and the bump instructions point at the same single source of truth — bumping the pin (per
+// docs/devtools-toolkit-contract.md's reconcile-then-bump procedure) means updating THIS
+// constant AND the `ref:` line in the frozen workflow contract together, in the same PR.
+// Neither one alone passes: change only the constant and this test fails; change only the
+// workflow and the contract test below fails.
+const PINNED_TOOLKIT_SHA = "a48356602eb73c41b6945de8211aabc4064e8a65";
+
+test("AIO-699: the pinned `unit tests` job's contract is unchanged", () => {
+  const pinnedJob = jobBlock(ciWorkflow, "test");
+  assert.ok(pinnedJob, "the pinned `test` (unit tests) job must still exist");
+
+  // Semantic properties that define "the pinned lane" — these are what toolkit-drift is
+  // measured against, so each one is asserted independently, not folded into one hash.
+  assert.match(
+    pinnedJob,
+    new RegExp(`ref: ${PINNED_TOOLKIT_SHA}\\b`),
+    "the AIO-685 pin must remain exact-SHA and untouched"
+  );
+  assert.match(pinnedJob, /repository: aiosbrain\/aios-workspace/, "checkout target unchanged");
+  assert.match(pinnedJob, /path: toolkit-checkout/, "checkout path unchanged");
+  assert.match(
+    pinnedJob,
+    /^          if \[ -f package-lock\.json \]; then npm ci; elif \[ -f package\.json \]; then npm install; fi$/m,
+    "devtools-side install command unchanged"
+  );
+  assert.match(
+    pinnedJob,
+    /^          npm ci$/m,
+    "toolkit provisioning install must stay plain `npm ci` (no flags silently added or removed)"
+  );
+  assert.doesNotMatch(
+    pinnedJob,
+    /npm ci --ignore-scripts/,
+    "the pinned lane's install behavior must not silently change"
+  );
+  assert.match(pinnedJob, /npm run build:loop --if-present/, "operator-loop build step unchanged");
+  assert.match(
+    pinnedJob,
+    /^          if \[ -f package\.json \]; then npm run test --if-present; else echo "no package\.json — skipping tests"; fi$/m,
+    "unconditional test invocation unchanged"
+  );
+});
+
+test("AIO-699: the toolkit-drift lane tracks core main and is bounded", () => {
+  const driftJob = jobBlock(ciWorkflow, "toolkit-drift");
+  assert.ok(driftJob, "the AIO-699 toolkit-drift job must exist");
+  assert.match(driftJob, /^          ref: main$/m, "the drift lane must track core main, never a pin");
+  assert.match(driftJob, /repository: aiosbrain\/aios-workspace/, "checkout target unchanged");
+  assert.match(
+    driftJob,
+    /^    timeout-minutes: 15$/m,
+    "a lane that installs and builds from floating core must stay bounded"
+  );
+  assert.match(
+    driftJob,
+    /^        run: npm ci --ignore-scripts$/m,
+    "floating core's install-time lifecycle scripts are unreviewed and must stay disabled"
+  );
+});
+
+/**
+ * THE CONTRACT. Every behaviorally meaningful line of ci.yml, frozen.
+ *
+ * This is one exact-match allowlist over the WHOLE FILE, and it replaced two per-job
+ * allowlists that adversarial review defeated at e5b2053 — not by finding a hole inside
+ * either job, but by changing things outside them:
+ *
+ *   - `defaults: {run: {shell: bash -c 'bash "$0" || true' {0}}}` at WORKFLOW level. GitHub
+ *     applies that to every `run` step in every job, so it swallowed a script exiting 23 in
+ *     both allowlisted jobs while changing nothing inside either job block. PyYAML and
+ *     actionlint both accepted it and the whole suite stayed green.
+ *   - `|| true` appended to both confidentiality leak scans in `gates`, a job no allowlist
+ *     covered at all — leaving the security gate free to report success after finding
+ *     confidential material. Also green.
+ *   - the same trick on `lint`, `test-no-toolkit` and `pack-verify`, all likewise uncovered.
+ *
+ * The fix is NOT a forbidden-substring rule for `defaults:`/`shell:`. That is the same
+ * blacklist mistake one level up, over a syntax (GitHub's) this repo neither controls nor
+ * can exhaust — and enumerating bad inputs is exactly what this contract was inverted away
+ * from in the first place. The fix is scope: allowlist the entire file, so any behaviorally
+ * meaningful line ANYWHERE — top-level keys included — has to be in the frozen contract.
+ *
+ * Cost: an intentional ci.yml edit must update test/fixtures/ci-workflow-contract.txt in the
+ * same PR. That is the point. Regenerate with
+ *
+ *     node test/workflow-contract-lib.mjs > test/fixtures/ci-workflow-contract.txt
+ *
+ * and read the diff before you do — this file is the only thing between a swallowed exit
+ * status and a green check.
+ */
+test("every behaviorally meaningful line of ci.yml matches the frozen contract", () => {
+  assert.deepEqual(
+    significantLines(ciWorkflow),
+    readCiContract(),
+    "ci.yml no longer matches test/fixtures/ci-workflow-contract.txt. Read this diff line by " +
+      "line: anything that changes what a step RUNS, or how its exit status is interpreted " +
+      "(defaults, shell, continue-on-error, a swallowed exit), is a security change. If every " +
+      "changed line is intended, regenerate the fixture in this same PR with " +
+      "`node test/workflow-contract-lib.mjs > test/fixtures/ci-workflow-contract.txt`."
   );
 });
 
