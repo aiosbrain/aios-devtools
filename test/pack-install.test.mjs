@@ -23,7 +23,14 @@ test("npm pack → install into a temp project → installed bin runs", { timeou
       cwd: repoRoot,
       encoding: "utf8",
     });
-    const [info] = JSON.parse(packJson);
+    // npm <= 11 prints an ARRAY of packed-tarball records; npm >= 12 prints an OBJECT KEYED BY
+    // PACKAGE NAME whose values are those same records. The publish workflow pins a newer npm
+    // than Node 22 bundles (trusted publishing needs >= 11.5.1), so destructuring as an array
+    // threw `object is not iterable` there while the normal CI lane stayed green. Verified
+    // against npm 10.9.4 and npm 12.0.2; the record fields (filename, files) are identical.
+    const packed = JSON.parse(packJson);
+    const [info] = Array.isArray(packed) ? packed : Object.values(packed);
+    assert.ok(info?.filename, `unrecognized npm pack --json shape: ${packJson.slice(0, 200)}`);
     const tarball = path.join(packDest, info.filename);
     const shipped = info.files.map((f) => f.path);
 

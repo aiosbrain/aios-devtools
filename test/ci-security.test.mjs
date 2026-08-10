@@ -241,5 +241,12 @@ test("the exact toolkit pin resolves from the public npm registry", () => {
     env: { ...process.env, npm_config_ignore_scripts: "true" },
   });
   assert.equal(result.status, 0, result.stderr || result.error?.message);
-  assert.equal(JSON.parse(result.stdout), expectedVersion);
+  // `npm view <exact-spec> version --json` prints a bare string on npm <= 11 and a
+  // single-element ARRAY on npm >= 12. Both mean "this exact version is on the registry", and
+  // the publish workflow deliberately runs a newer npm than the one bundled with Node 22
+  // (trusted publishing needs >= 11.5.1), so this assertion has to accept both shapes or the
+  // publish lane fails on a difference that says nothing about the pin.
+  const viewed = JSON.parse(result.stdout);
+  const versions = Array.isArray(viewed) ? viewed : [viewed];
+  assert.deepEqual(versions, [expectedVersion]);
 });
