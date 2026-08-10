@@ -246,8 +246,10 @@ jobs:
           fi
           npm install -g "npm@$PINNED_NPM" --ignore-scripts
           npm --version
+      # This package declares no install/prepare lifecycle scripts, so --ignore-scripts is a
+      # behavioural no-op here and simply keeps dependency lifecycle code from running.
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
       - name: Test on the publish lane's npm (AIOS_TOOLKIT_DIR unset)
         run: npm test
 

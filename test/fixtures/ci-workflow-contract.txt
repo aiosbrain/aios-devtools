@@ -168,7 +168,7 @@ jobs:
           npm install -g "npm@$PINNED_NPM" --ignore-scripts
           npm --version
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
       - name: Test on the publish lane's npm (AIOS_TOOLKIT_DIR unset)
         run: npm test
   pack-verify:
