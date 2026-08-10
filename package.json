@@ -18,6 +18,8 @@
     "./consolidate-findings": "./scripts/consolidate-findings.mjs",
     "./ship": "./scripts/ship.mjs",
     "./roadmap-run": "./scripts/roadmap-run.mjs",
+    "./loop-models": "./scripts/loop-models.mjs",
+    "./model-providers": "./scripts/model-providers.mjs",
     "./package.json": "./package.json"
   },
   "files": [
