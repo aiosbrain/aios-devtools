@@ -201,6 +201,58 @@ jobs:
       - name: Test without a toolkit (AIOS_TOOLKIT_DIR unset)
         run: npm test
 
+  # The publish path runs a DIFFERENT npm major than every lane above. Trusted publishing
+  # needs npm >= 11.5.1, so publish-npm.yml installs the pin from `.npm-version`, while every
+  # other job here runs whatever npm ships bundled with Node 22 (10.x/11.x). That divergence
+  # was invisible to CI, and it bit: npm 12 changed two `--json` output shapes —
+  # `npm view <exact-spec> version --json` went from a bare string to a single-element array,
+  # and `npm pack --json` went from an array of records to an OBJECT keyed by package name.
+  # Two tests parsed the old shapes. They stayed green on every PR and broke only inside the
+  # publish workflow's own `npm test` gate, which is reachable solely by manual dispatch, so
+  # nothing reported it until a release was attempted (fixed in #11 — this lane fixes the
+  # class, not that instance).
+  #
+  # This job reproduces the publish job's environment — Node 22, the pinned npm, no toolkit —
+  # and runs the same `npm test` gate, so the next such difference (including the next time
+  # Node's bundled npm moves under us) fails a PR check instead of a release.
+  #
+  # WHY NOT just pin this npm everywhere: `tests (no toolkit)` on the bundled npm is what
+  # proves the suite works for a fresh `npm install @aiosbrain/aios-devtools` consumer, who
+  # has whatever npm their Node shipped. Pinning every lane would delete that coverage and
+  # couple all of CI to one npm bump. Two lanes, one pin, read from one file.
+  test-publish-npm:
+    name: tests (publish lane npm)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      # Byte-identical install line to publish-npm.yml, reading the same `.npm-version`.
+      # The exact x.y.z assertion is not cosmetic: a range or `latest` here would silently
+      # stop testing the version that actually publishes, which is the whole point.
+      # --ignore-scripts matches the publish job's supply-chain hygiene.
+      - name: Install the pinned npm the publish workflow uses
+        run: |
+          PINNED_NPM="$(tr -d '[:space:]' < .npm-version)"
+          if ! printf '%s' "$PINNED_NPM" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::.npm-version must contain an exact x.y.z npm version (got '$PINNED_NPM')"
+            exit 1
+          fi
+          npm install -g "npm@$PINNED_NPM" --ignore-scripts
+          npm --version
+      # This package declares no install/prepare lifecycle scripts, so --ignore-scripts is a
+      # behavioural no-op here and simply keeps dependency lifecycle code from running.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Test on the publish lane's npm (AIOS_TOOLKIT_DIR unset)
+        run: npm test
+
   # AIO-594 PR A — clean production install + package verification: npm pack, assert the
   # files allowlist, install the tarball into a fresh temp project, run the installed
   # `aios-devtools` bin and resolve the exports map (test/pack-install.test.mjs).
