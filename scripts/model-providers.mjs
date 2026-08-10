@@ -13,10 +13,41 @@
 /** @typedef {{ provider: string, modelId: string, raw: string }} ModelRef */
 
 export const AGENTIC_PROVIDERS = new Set(["claude", "cursor", "opencode", "codex"]);
-export const PROMPT_PROVIDERS = new Set(["openrouter", "deepseek", "opencode", "cursor", "claude"]);
 // These are the approved Codex execution tiers for the AIO-381 delivery lane. Keeping the
 // allowlist here lets `aios ship` reject a typo before it creates a worktree or starts a run.
 export const CODEX_MODEL_TIERS = new Set(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
+
+export const REVIEWER_PRESETS = {
+  deepseek: {
+    model: "deepseek:deepseek-v4-pro",
+    billing: "api",
+    description: "DeepSeek's own API — keyed by DEEPSEEK_API_KEY.",
+  },
+  "claude-subscription": {
+    model: "claude:fable-5",
+    billing: "subscription",
+    description: "Fable via the local Claude CLI login.",
+  },
+  "codex-subscription": {
+    model: "codex:gpt-5.6-terra",
+    billing: "subscription",
+    description: "Codex via the local Codex CLI login.",
+  },
+  "opencode-glm": {
+    model: "opencode:glm-5.2",
+    billing: "api",
+    description: "GLM via the OpenCode Go API.",
+  },
+  "openrouter-gpt": {
+    model: "openrouter:openai/gpt-5.5",
+    billing: "api",
+    description: "GPT via OpenRouter.",
+  },
+};
+
+export function resolveReviewerPreset(name) {
+  return Object.hasOwn(REVIEWER_PRESETS, name) ? REVIEWER_PRESETS[name] : null;
+}
 
 // Bare open-model ids → OpenRouter vendor/model when OpenCode isn't keyed.
 export const OPENROUTER_ALIASES = {
