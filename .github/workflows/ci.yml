@@ -201,6 +201,44 @@ jobs:
       - name: Test without a toolkit (AIOS_TOOLKIT_DIR unset)
         run: npm test
 
+  # AIO-663 — the copy ledger, enforced. `docs/copy-ledger.md` tracked 17 files duplicated
+  # between this repo and core for two weeks with nothing checking them; six had drifted by
+  # 2026-08-16, three behaviourally (see the ledger's "Why this was needed" section).
+  #
+  # This is COMPLEMENTARY to `toolkit-drift` above, not a replacement: that lane runs this
+  # repo's TESTS against core main, so it only fires when a divergence happens to break a test,
+  # and all six drifts sailed through it. This lane compares BYTES, row by row, driven by the
+  # ledger table itself — so a copy cannot rot quietly, and the ledger cannot quietly stop
+  # describing reality (an undeclared row or a stale path fails the check outright).
+  #
+  # Like `toolkit-drift` it tracks core `main` rather than the `unit tests` pin: the question
+  # is whether the copies match core AS IT IS, not as it was at the last pin bump. Unlike that
+  # lane it never installs, builds, or executes anything from core — it only reads files — so
+  # floating `main` carries no supply-chain exposure here. No `npm ci` at all: the checker
+  # imports node builtins and one local module.
+  copy-parity:
+    name: copy parity (core main)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checkout AIOS core (main — the copies must match core as it is now)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: aiosbrain/aios-workspace
+          ref: main
+          path: core-checkout
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Byte-compare every enforced ledger row against core
+        run: node scripts/check-copy-parity.mjs --core "${{ github.workspace }}/core-checkout"
+
   # The publish path runs a DIFFERENT npm major than every lane above. Trusted publishing
   # needs npm >= 11.5.1, so publish-npm.yml installs the pin from `.npm-version`, while every
   # other job here runs whatever npm ships bundled with Node 22 (10.x/11.x). That divergence

@@ -2,8 +2,8 @@
 
 ## Why
 
-Three related-feeling improvements to the operator loop and its GUI, batched together so the demo
-is complete in one pass.
+Three related-feeling improvements to the operator loop and its surrounding surfaces, batched
+together so the demo is complete in one pass.
 
 ## What
 
@@ -12,15 +12,15 @@ Ship Telegram ask alerts, native Gmail reply send, and the remaining unified-inb
 ## Acceptance criteria
 
 - `aios inbox` surfaces Telegram alerts with exit code 0.
-- The GUI reply composer sends a real Gmail message and shows a confirmation toast.
+- The reply composer sends a real Gmail message and reports a confirmation.
 - The demo walkthrough completes with no synthetic errors dropped.
 
 ## Tasks
 
 - Wire Telegram alert delivery in `src/operator-loop/inbox/alerts.ts`.
 - Add a native Gmail send path in `scripts/inbox.mjs`.
-- Add the reply composer to `gui/client/src/components/comms/CommsDetail.tsx`.
-- Add the send endpoint to `gui/server/index.mjs`.
+- Add the reply composer to `src/inbox-compose/composer.ts`.
+- Add the post-send notifier in `hooks/inbox-sent.mjs`.
 - Update the inbox ranking in `src/operator-loop/inbox/rank.ts`.
 - Add a redaction lint rule in `scripts/inbox-redaction-lint.mjs`.
 - Update the validators in `validation/validate-all.sh`.

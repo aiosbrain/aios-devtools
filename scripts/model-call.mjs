@@ -192,11 +192,11 @@ export async function callOpencodeAgent(prompt, timeoutMs, opts = {}) {
 /**
  * Run Codex in its target worktree and return its final response.
  *
- * OPENAI_API_KEY is ALWAYS stripped from the child env (mirroring core's callCodexAgent): the
- * `codex-subscription` preset declares `billing: "subscription"`, and the Codex CLI silently
- * prefers an API key over the logged-in subscription when one is present. Leaving it set would
- * bill metered credits for a run the operator asked to put on their subscription. The caller's
- * env object is cloned, never mutated.
+ * OPENAI_API_KEY is ALWAYS stripped from the child env, mirroring callClaudeAgent's treatment
+ * of ANTHROPIC_API_KEY: aios steps run under `npm run aios` (dotenvx-injected keys), and without
+ * this strip a spawned `codex` flips from its own login/subscription auth to metered API
+ * billing. A caller-supplied opts.env is cloned, not required, so this stays authoritative even
+ * when the caller passes its own env.
  */
 export async function callCodexAgent(prompt, timeoutMs, opts = {}) {
   const model = String(opts.model ?? "").trim();
@@ -214,7 +214,6 @@ export async function callCodexAgent(prompt, timeoutMs, opts = {}) {
       `invalid Codex reasoning effort '${effort}' — expected one of ${[...CODEX_REASONING_EFFORTS].join("|")}`
     );
   }
-
   const cwd = opts.cwd ?? process.cwd();
   const dir = await mkdtemp(path.join(tmpdir(), "aios-codex-"));
   const outputFile = path.join(dir, "last-message.txt");

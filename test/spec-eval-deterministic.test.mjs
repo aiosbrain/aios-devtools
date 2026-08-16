@@ -147,7 +147,7 @@ test("SR17 — a single tripped signal is advisory, not a blocker", () => {
     "# Spec",
     "## Tasks",
     "- edit `scripts/a.mjs`",
-    "- edit `gui/client/src/b.tsx`",
+    "- edit `src/b.ts`",
     "- edit `hooks/c.mjs`",
     "- also touch `validation/d.sh`",
   ].join("\n");
@@ -259,17 +259,31 @@ test("assessScopeBound — counts tasks, distinct surfaces, and increment statem
     "## Implementation",
     "- edit `scripts/a.mjs`",
     "- edit `scripts/b.mjs`",
-    "- edit `gui/server/c.mjs`",
+    "- edit `hooks/c.mjs`",
   ].join("\n");
   const s = assessScopeBound(spec);
   assert.equal(s.taskCount, 3);
-  assert.deepEqual(s.surfaces, ["gui/server", "scripts"]);
+  assert.deepEqual(s.surfaces, ["hooks", "scripts"]);
   assert.equal(s.incrementStated, true);
 
   const bare = assessScopeBound("# Spec\nno tasks, no paths, no increment note");
   assert.equal(bare.taskCount, 0);
   assert.deepEqual(bare.surfaces, []);
   assert.equal(bare.incrementStated, false);
+});
+
+// AIO-663 copy-ledger row 12 / AIO-612: `gui/client` and `gui/server` were deleted from core on
+// 2026-08-04, but this repo's copy of deterministic.mjs kept grading against them — and spec-eval
+// RUNS FROM here, so every eval counted surfaces that no longer exist in the repo being graded.
+// Byte parity with core is enforced by scripts/check-copy-parity.mjs; this pins the behaviour.
+test("SR17 surfaces no longer include the deleted gui/* surfaces (AIO-612)", () => {
+  const spec = [
+    "# Spec",
+    "## Tasks",
+    "- edit `gui/client/src/a.tsx`",
+    "- edit `gui/server/b.mjs`",
+  ].join("\n");
+  assert.deepEqual(assessScopeBound(spec).surfaces, []);
 });
 
 // ── AIO-573: path classification must not manufacture blockers ────────────────────────────────
