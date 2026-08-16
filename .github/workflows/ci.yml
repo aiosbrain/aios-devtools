@@ -88,9 +88,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: aiosbrain/aios-workspace
-          # AIO-685 contract pin: current core candidate, including corrected SR18 semantics.
+          # AIO-663 contract pin (2026-08-16, 78 commits on from the AIO-685 pin at a483566):
+          # core main at the point the copy-ledger convergence landed on both sides, so the
+          # pinned lane and the `copy parity (core main)` lane start from the same core shape.
           # Keep exact-SHA pinned so the CI input is reproducible; bumps must reconcile drift.
-          ref: a48356602eb73c41b6945de8211aabc4064e8a65
+          ref: 3d92e89f452e9393944c4485238c3a2350efb6db
           path: toolkit-checkout
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
