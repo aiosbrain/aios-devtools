@@ -22,25 +22,57 @@ a more specific issue that executes that row's work: row 13 is owned by **AIO-68
 row 1 is entangled with **AIO-684** (the CLI marker tokens defined in `relay-core.mjs`).
 Reporting on AIO-663 alone therefore understates the ledger — read the Linear column.
 
-| # | Temporary copy | Required disposition | Status | Linear issue |
-|---|----------------|----------------------|--------|--------------|
-| 1 | `scripts/relay-core.mjs` | foundation export or Devtools-owned | unresolved | AIO-663 (entangled with AIO-684) |
-| 2 | `scripts/model-call.mjs` | foundation model-dispatch export | unresolved | AIO-663 |
-| 3 | `scripts/loop-models.mjs` | foundation model-dispatch export | unresolved | AIO-663 |
-| 4 | `scripts/model-providers.mjs` | foundation model-dispatch export | unresolved | AIO-663 |
-| 5 | `scripts/pr.mjs` | foundation GitHub-plumbing export | unresolved | AIO-663 |
-| 6 | `scripts/skill-context.mjs` | foundation skill-context export | unresolved | AIO-663 |
-| 7 | `scripts/cli-common.mjs` | foundation CLI-plumbing export | unresolved | AIO-663 |
-| 8 | `scripts/ui/output-context.mjs` | foundation CLI-plumbing export | unresolved | AIO-663 |
-| 9 | `scripts/severity.mjs` | foundation severity export | unresolved | AIO-663 |
-| 10 | `scripts/verify-cmd.mjs` | foundation verification-command export | unresolved | AIO-663 |
-| 11 | `scripts/spec-checks.mjs` | foundation deterministic-spec export | unresolved | AIO-663 |
-| 12 | `scripts/spec-checks/deterministic.mjs` | move with spec-checks export | unresolved | AIO-663 |
-| 13 | `scripts/spec-checks/rubric.mjs` | move with spec-checks; replace module-relative rubric fallback with toolkit resolution | unresolved | AIO-686 |
-| 14 | `scripts/spec-checks/spec-text.mjs` | move with spec-checks export | unresolved | AIO-663 |
-| 15 | `scripts/scan-file.mjs` | foundation scan export | unresolved | AIO-663 |
-| 16 | `scripts/toolkit-locate.mjs` | foundation locator export or separately versioned identical contract implementation | unresolved | AIO-663 |
-| 17 | `docs/devtools-toolkit-contract.md` | Devtools canonical; Workspace retains a short consumer contract/link | unresolved | AIO-663 |
+## This table is executed, not just read (2026-08-16)
+
+`scripts/check-copy-parity.mjs` **parses this table** and byte-compares every row against a
+core `aios-workspace` checkout; the `copy parity (core main)` CI job runs it against core
+`main` on every PR. The **Byte parity** column is that check's input:
+
+- `enforced` — the two copies must be byte-identical. Any difference fails CI.
+- `exempt (<reason>)` — the copies are deliberately not convergent. The reason is mandatory
+  and is printed on every run. Exempt rows are still diffed and reported (advisory), so an
+  intentional divergence never becomes an unexamined hiding place.
+
+A row with no parity mode, an empty exemption reason, or a path that no longer exists is a
+hard failure — a ledger that has stopped describing reality is the condition the check exists
+to catch. Editing the table therefore changes what CI enforces; keep them one edit.
+
+**Why this was needed.** The ledger tracked 17 copies for two weeks with nothing enforcing
+them. A 2026-08-16 audit byte-diffed all 17 and found six drifted, three behaviourally:
+row 6 never received core's boundary-aware skill-sigil hardening (a skill id inside a URL or
+path mis-routed); row 12 still graded specs against the `gui/client` and `gui/server` surfaces
+core deleted in AIO-612 on 2026-08-04, and **spec-eval runs from this repo**, so every eval
+was scoring surfaces that no longer existed in the repo being graded; row 16 — the module that
+*defines* the split's seam — disagreed with itself across the two repos about both its
+validation rule and its exported API. The existing `toolkit-drift` lane passed through all six,
+correctly: it runs this repo's tests against core `main`, so it only fires when a divergence
+happens to break a test. Bytes needed a byte check.
+
+**Byte convergence is not a terminal disposition.** Rows 2, 4, 6, 12 and 16 are now
+byte-identical to core and machine-enforced, but they are still *duplicates* — ownership
+(foundation export / devtools-owned / core-owned-via-seam) remains open, so their Status stays
+`unresolved`. The two columns answer different questions: Status is "who will own this", Byte
+parity is "can it rot while we decide".
+
+| # | Temporary copy | Required disposition | Status | Byte parity | Linear issue |
+|---|----------------|----------------------|--------|-------------|--------------|
+| 1 | `scripts/relay-core.mjs` | foundation export or Devtools-owned | unresolved | enforced | AIO-663 (entangled with AIO-684) |
+| 2 | `scripts/model-call.mjs` | foundation model-dispatch export | unresolved | enforced | AIO-663 |
+| 3 | `scripts/loop-models.mjs` | foundation model-dispatch export | unresolved | exempt (core imports `./flat-yaml.mjs`; this repo imports `@aiosbrain/foundation/internal/flat-yaml`, which core does not yet depend on. Resolves only when the module moves into `@aiosbrain/foundation` — until then the copies also carry unreconciled reviewer-preset error-message deltas, visible in this check's advisory diff) | AIO-663 |
+| 4 | `scripts/model-providers.mjs` | foundation model-dispatch export | unresolved | enforced | AIO-663 |
+| 5 | `scripts/pr.mjs` | foundation GitHub-plumbing export | unresolved | enforced | AIO-663 |
+| 6 | `scripts/skill-context.mjs` | foundation skill-context export | unresolved | enforced | AIO-663 |
+| 7 | `scripts/cli-common.mjs` | foundation CLI-plumbing export | unresolved | enforced | AIO-663 |
+| 8 | `scripts/ui/output-context.mjs` | foundation CLI-plumbing export | unresolved | enforced | AIO-663 |
+| 9 | `scripts/severity.mjs` | foundation severity export | unresolved | enforced | AIO-663 |
+| 10 | `scripts/verify-cmd.mjs` | foundation verification-command export | unresolved | enforced | AIO-663 |
+| 11 | `scripts/spec-checks.mjs` | foundation deterministic-spec export | unresolved | enforced | AIO-663 |
+| 12 | `scripts/spec-checks/deterministic.mjs` | move with spec-checks export | unresolved | enforced | AIO-663 |
+| 13 | `scripts/spec-checks/rubric.mjs` | move with spec-checks; replace module-relative rubric fallback with toolkit resolution | unresolved | enforced | AIO-686 |
+| 14 | `scripts/spec-checks/spec-text.mjs` | move with spec-checks export | unresolved | enforced | AIO-663 |
+| 15 | `scripts/scan-file.mjs` | foundation scan export | unresolved | enforced | AIO-663 |
+| 16 | `scripts/toolkit-locate.mjs` | foundation locator export or separately versioned identical contract implementation | unresolved | enforced | AIO-663 |
+| 17 | `docs/devtools-toolkit-contract.md` | Devtools canonical; Workspace retains a short consumer contract/link | unresolved | exempt (this repo is the canonical owner by disposition; core keeps a shorter consumer-side contract. The two are deliberately different documents, not copies) | AIO-663 |
 
 Governance-stamp files (`scripts/check-file-size.mjs`, `scripts/check-boundaries.mjs`,
 `scripts/git-files.mjs`, `scripts/leak-gate.sh`, `validation/agent-readiness-lib.mjs`,

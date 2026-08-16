@@ -19,6 +19,13 @@
  * falls back, because a wrong-but-working fallback would run a different toolkit than the one
  * the operator asked for. The resolved dir is realpath'd so in-monorepo seam loads resolve to
  * the same module URLs as the pre-seam static imports (one ESM cache entry, not two instances).
+ *
+ * PARITY (AIO-663, copy-ledger row 16): this file is byte-identical to
+ * `scripts/toolkit-locate.mjs` in `aiosbrain/aios-devtools`, and that repo's
+ * `scripts/check-copy-parity.mjs` fails CI when the two diverge. Both copies therefore carry the
+ * FULL API surface even where one side has no in-repo caller — core keeps `stripToolkitDirArgs()`
+ * (only the devtools commands call it) rather than let the module that defines the split's seam
+ * disagree with itself across the split. Change it in both repos, in the same shape, or neither.
  */
 
 import { existsSync, realpathSync } from "node:fs";
@@ -38,6 +45,14 @@ export function looksLikeToolkit(dir) {
   return missingMarkers(dir).length === 0;
 }
 
+/**
+ * The single validation rule for the flag's value, shared by `locateToolkit` and
+ * `stripToolkitDirArgs` so the flag cannot mean one thing to the locator and another to the
+ * normalizer. Any leading `-` is rejected, not just `--`: short flags (`-h`, `-n`) are real, and
+ * `stripToolkitDirArgs` DROPS the value it consumes, so a lenient rule would silently swallow the
+ * following option and then fail with a confusing "cannot locate the AIOS toolkit: <cwd>/-h".
+ * A genuine path starting with `-` is still reachable as `./-h`.
+ */
 function requireToolkitDirValue(value) {
   if (!value || value.startsWith("-")) {
     throw new Error(

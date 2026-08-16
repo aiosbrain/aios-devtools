@@ -53,8 +53,6 @@ const SR17_TASK_HEADING_RE =
 // names its test file, docs page, and scaffold mirror — those references measure spec completeness,
 // not mixed concerns, and counting them made SR17 hard-block well-bounded specs (2026-07-22).
 const SR17_SURFACES = [
-  ["gui/client", /^gui\/client\b/],
-  ["gui/server", /^gui\/server\b/],
   ["scripts", /^scripts\b/],
   ["src/operator-loop", /^src\/operator-loop\b/],
   ["src", /^src\b(?!\/operator-loop)/],
@@ -66,7 +64,7 @@ const SR17_SURFACES = [
 const SR17_INCREMENT_RE =
   /\b(one\s+pr|single\s+pr|this\s+pr\b|one\s+increment|line\s+budget|~?\d{2,4}\s*(loc|lines)\b|follow-?ups?\s+(are\s+)?deferred|sibling\s+spec|split\s+into\s+\w+\s+spec|first\s+slice|slice\s+\d|one\s+surface)\b/i;
 
-// ── SR18: scope-fence accounting ─────────────────────────────────────────────────────────
+// ── SR18: scope-fence accounting ──────────────────────────────────────────────────────────────
 //
 // A blanket constraint ("no change to any file that `/` renders", "must be byte-identical") is the
 // cheapest way to lose work. It reads as discipline, it passes SR5 because a Scope section still

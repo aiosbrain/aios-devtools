@@ -23,7 +23,11 @@ Resolution order (`locateToolkit()`):
 1. explicit `--toolkit-dir <path>` argv flag (or a `toolkitDir` param). The shared
    `stripToolkitDirArgs()` normalizer removes the selector before ship, build, spec,
    spec-publish, roadmap-run, and consolidate-findings parse command-specific positions,
-   without mutating `process.argv`, which remains available to the locator;
+   without mutating `process.argv`, which remains available to the locator. Both entry points
+   validate the value through **one** rule: anything starting with `-` is rejected, because the
+   normalizer DROPS the token it consumes and a laxer rule would silently swallow a following
+   short flag (`--toolkit-dir -n plan.md` eating `-n`) and then fail with a nonsense path. A
+   genuine path beginning with `-` is still reachable as `./-n`;
 2. `AIOS_TOOLKIT_DIR` env var;
 3. the containing repo root (`scripts/..`), when it looks like a toolkit — pre-cut this is
    always true, so everything works unchanged in-monorepo;
@@ -112,6 +116,20 @@ Procedure when `toolkit-drift` goes red:
 3. Bump the pin in the `unit tests` job's `Checkout AIOS toolkit` step to the reconciled core
    SHA, in the **same PR** as the reconciliation — never bump the pin alone, and never leave the
    reconciliation stacked behind a separate pin bump.
+
+### `toolkit-drift` is a behaviour check, not a parity check (AIO-663)
+
+Running this repo's suite against core `main` only fails when a divergence happens to break a
+devtools test. A copy in `docs/copy-ledger.md` can drift arbitrarily far and stay green — and
+did: six of the seventeen ledger copies had drifted by 2026-08-16, three of them behaviourally,
+with `toolkit-drift` passing throughout. `scripts/check-copy-parity.mjs` and the `copy parity
+(core main)` job are the complementary byte comparison; they are driven by the ledger table
+itself, so the ledger is now executable rather than aspirational. Keep both — one asks "does
+core's current shape still work here", the other asks "are the copies actually the same file".
+
+`scripts/toolkit-locate.mjs` is ledger row 16 and is therefore **byte-identical to core's
+copy**, including exports core has no in-repo caller for. Changing this seam means the same
+change in `aiosbrain/aios-workspace`, in the same shape, or the parity job fails.
 
 ### Editing `ci.yml` at all means updating the frozen contract
 
