@@ -131,7 +131,7 @@ test("health upload failures are not retried with a destructive plain upload", (
 // constant AND the `ref:` line in the frozen workflow contract together, in the same PR.
 // Neither one alone passes: change only the constant and this test fails; change only the
 // workflow and the contract test below fails.
-const PINNED_TOOLKIT_SHA = "a48356602eb73c41b6945de8211aabc4064e8a65";
+const PINNED_TOOLKIT_SHA = "3d92e89f452e9393944c4485238c3a2350efb6db";
 
 test("AIO-699: the pinned `unit tests` job's contract is unchanged", () => {
   const pinnedJob = jobBlock(ciWorkflow, "test");
@@ -142,7 +142,7 @@ test("AIO-699: the pinned `unit tests` job's contract is unchanged", () => {
   assert.match(
     pinnedJob,
     new RegExp(`ref: ${PINNED_TOOLKIT_SHA}\\b`),
-    "the AIO-685 pin must remain exact-SHA and untouched"
+    "the toolkit pin must remain exact-SHA and untouched"
   );
   assert.match(pinnedJob, /repository: aiosbrain\/aios-workspace/, "checkout target unchanged");
   assert.match(pinnedJob, /path: toolkit-checkout/, "checkout path unchanged");
