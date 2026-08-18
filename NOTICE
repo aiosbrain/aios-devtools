@@ -1,0 +1,25 @@
+AIOS devtools
+Copyright (C) 2026 Chetan Nandakumar and John Ellison
+
+This software is licensed under the GNU Affero General Public License v3.0 only
+(AGPL-3.0-only). See LICENSE.
+
+This file records third-party components carrying an attribution obligation. It is
+not a complete dependency list — see package.json and package-lock.json for that.
+
+
+Direct dependencies
+-------------------
+
+@aiosbrain/foundation — GNU AGPL-3.0-only
+    https://github.com/aiosbrain/aios-workspace
+    Copyright (C) 2026 Chetan Nandakumar and John Ellison
+    The shared workspace foundation library (Linear client, constitution digest,
+    flat-YAML parser), which lives in `packages/foundation` of the AIOS workspace
+    repository. Both packages are AGPL-3.0-only, so this dependency runs in the
+    permitted direction. See LICENSING.md.
+
+@anthropic-ai/sdk — MIT License
+    https://github.com/anthropics/anthropic-sdk-typescript
+    Copyright (c) Anthropic, PBC. MIT is permissive and absorbs cleanly into an
+    AGPL-licensed work.

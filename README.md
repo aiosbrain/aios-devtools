@@ -119,3 +119,19 @@ error** — parity with core, not six clean exits.
 
 Stamped by `aios repo-bootstrap` (worktree guard pack, file-size gate,
 boundary gate, leak gate, CI skeleton) — see `ENGINEERING-CONSTITUTION.md`.
+
+## License
+
+**AGPL-3.0-only.** Running this inside your company is unrestricted — the AGPL places no
+obligation on internal use, at any scale, however much you modify it.
+
+Prior releases remain MIT, preserved in [`LICENSE-MIT`](LICENSE-MIT); the change is
+going-forward only. If your organization's policy bans AGPL, there is a
+[free commercial license](COMMERCIAL-LICENSE.md) for internal use — email cn@fluora.ai.
+
+Why AGPL and not Apache-2.0 for a published package, given the SDKs elsewhere in AIOS are
+permissive: see [`LICENSING.md`](LICENSING.md). Short version — the `AIO-` issue prefix is
+hardcoded in six modules, so this is internal tooling today, and it depends on
+`@aiosbrain/foundation`, which is AGPL.
+
+Longer answers: [licensing FAQ](docs/LICENSING-FAQ.md).
