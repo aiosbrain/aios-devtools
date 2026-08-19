@@ -36,7 +36,7 @@ Depends on: none (toolkit PR in `aios-workspace`; dogfood copy in `john-workspac
 
 **In:** template + spec-eval sync + linear CLI + workstream skill + rule + tests + this Linear issue.
 
-**Deferred:** custom Linear MCP server; harness hooks blocking close on unchecked boxes; brain pm-sync template injection; PIKL team.
+**Deferred:** custom Linear MCP server; harness hooks blocking close on unchecked boxes; brain pm-sync template injection; a client team.
 
 ## Implementation approach
 
