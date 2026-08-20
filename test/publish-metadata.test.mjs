@@ -177,9 +177,8 @@ test("the lockfile agrees with the manifest about version and license", () => {
 test("the shipped changelog names the version being published", () => {
   assert.ok(pkg.files.includes("CHANGELOG.md"), "CHANGELOG.md must ship in the tarball");
   const changelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
-  assert.match(
-    changelog,
-    new RegExp(`^## \\[${pkg.version.replace(/\./g, "\\.")}\\]`, "m"),
+  assert.ok(
+    changelog.split("\n").some((line) => line.startsWith(`## [${pkg.version}]`)),
     `CHANGELOG.md must contain a '## [${pkg.version}]' section — publish-npm.yml gates on it`
   );
 });
