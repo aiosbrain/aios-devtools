@@ -1,7 +1,7 @@
 {
   "name": "@aiosbrain/aios-devtools",
-  "version": "0.2.1",
-  "description": "AIOS devtools — the ship/build/roadmap-run/spec-eval/spec-publish/consolidate-findings command set, cut from aiosbrain/aios-workspace (AIO-594). Toolkit-seam functionality requires an AIOS toolkit checkout via AIOS_TOOLKIT_DIR or --toolkit-dir (docs/devtools-toolkit-contract.md).",
+  "version": "0.3.0",
+  "description": "AIOS devtools \u2014 the ship/build/roadmap-run/spec-eval/spec-publish/consolidate-findings command set, cut from aiosbrain/aios-workspace (AIO-594). Toolkit-seam functionality requires an AIOS toolkit checkout via AIOS_TOOLKIT_DIR or --toolkit-dir (docs/devtools-toolkit-contract.md).",
   "type": "module",
   "license": "AGPL-3.0-only",
   "repository": {
@@ -31,6 +31,7 @@
     "./package.json": "./package.json"
   },
   "files": [
+    "CHANGELOG.md",
     "scripts/",
     "docs/",
     "validation/agent-readiness-lib.mjs"

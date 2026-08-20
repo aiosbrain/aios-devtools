@@ -51,13 +51,38 @@ jobs:
           npm install -g "npm@$PINNED_NPM" --ignore-scripts
           npm --version
 
-      - name: Version guard (input must match package.json)
+      - name: Version + release-ref guard
         env:
           INPUT_VERSION: ${{ inputs.version }}
+          GIT_REF: ${{ github.ref }}
+          GIT_REF_TYPE: ${{ github.ref_type }}
         run: |
           PKG_VERSION="$(node -p "require('./package.json').version")"
           if [ "$INPUT_VERSION" != "$PKG_VERSION" ]; then
-            echo "::error::input version '$INPUT_VERSION' != package.json version '$PKG_VERSION' on this ref — bump package.json first."
+            echo "::error::input version '$INPUT_VERSION' != package.json version '$PKG_VERSION' on this ref — bump package.json (with a CHANGELOG entry) first."
+            exit 1
+          fi
+          # A published version is immutable, so the commit it was built from must be too.
+          # Dispatching from a BRANCH cannot be reproduced: the branch moves. Require the exact
+          # tag. NOTE: the Run-workflow dialog defaults "Use workflow from" to the default
+          # branch — select the tag, or this guard will (correctly) refuse.
+          EXPECTED_REF="refs/tags/v$PKG_VERSION"
+          case "$PKG_VERSION" in
+            *-*)
+              echo "::error::$PKG_VERSION is a prerelease and must not publish to npm's stable latest channel."
+              exit 1
+              ;;
+          esac
+          if [ "$GIT_REF_TYPE" != "tag" ] || [ "$GIT_REF" != "$EXPECTED_REF" ]; then
+            echo "::error::@aiosbrain/aios-devtools@$PKG_VERSION may only publish from the exact tag '$EXPECTED_REF' (got '$GIT_REF'). Create and push that tag, then re-dispatch selecting it."
+            exit 1
+          fi
+
+      - name: Changelog guard (the tarball ships CHANGELOG.md — it must name this version)
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if ! grep -q "^## \\[$PKG_VERSION\\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$PKG_VERSION]' section. It ships inside the immutable tarball, so it must be written in the SAME change as the version bump."
             exit 1
           fi
 

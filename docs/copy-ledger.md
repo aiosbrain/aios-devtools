@@ -68,7 +68,7 @@ parity is "can it rot while we decide".
 | 10 | `scripts/verify-cmd.mjs` | foundation verification-command export | unresolved | enforced | AIO-663 |
 | 11 | `scripts/spec-checks.mjs` | foundation deterministic-spec export | unresolved | enforced | AIO-663 |
 | 12 | `scripts/spec-checks/deterministic.mjs` | move with spec-checks export | unresolved | enforced | AIO-663 |
-| 13 | `scripts/spec-checks/rubric.mjs` | move with spec-checks; replace module-relative rubric fallback with toolkit resolution | unresolved | enforced | AIO-686 |
+| 13 | `scripts/spec-checks/rubric.mjs` | move with spec-checks; ~~replace module-relative rubric fallback with toolkit resolution~~ — **toolkit resolution landed (AIO-686)**: the fallback now goes through `getToolkit()`, so a rubric-less repo grades against the toolkit's own rubric instead of exiting 4. The row stays `unresolved` because the MODULE is still a copy — only the fallback was fixed, not the duplication | unresolved | enforced | AIO-686 |
 | 14 | `scripts/spec-checks/spec-text.mjs` | move with spec-checks export | unresolved | enforced | AIO-663 |
 | 15 | `scripts/scan-file.mjs` | foundation scan export | unresolved | enforced | AIO-663 |
 | 16 | `scripts/toolkit-locate.mjs` | foundation locator export or separately versioned identical contract implementation | unresolved | enforced | AIO-663 |

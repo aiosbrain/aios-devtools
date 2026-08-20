@@ -1124,10 +1124,9 @@ export async function cmdSpec(repo, args) {
     process.exit(4);
   }
 
-  const rubricPath = resolveRubricPath(repo, flag("--rubric"));
   let rubric;
   try {
-    rubric = loadRubric(rubricPath);
+    rubric = loadRubric(resolveRubricPath(repo, flag("--rubric")));
   } catch (e) {
     console.error(c.red(`error: ${e.message}`));
     process.exit(4);

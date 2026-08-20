@@ -112,22 +112,44 @@ test(
   }
 );
 
+// Deliberately NOT toolkit-gated: this asserts what happens when there is NO usable toolkit, so a
+// toolkit-dependent skip would hide exactly the case under test. It only needs the CLI to run.
+test("an unlocatable toolkit exits 4 like every other rubric-load failure, not 1", () => {
+  const bare = mkdtempSync(path.join(tmpdir(), "no-toolkit-repo-"));
+  try {
+    const spec = path.join(bare, "issue.md");
+    writeFileSync(spec, readFileSync(STRONG, "utf8"));
+    const r = spawnSync(process.execPath, [CLI, "spec", "eval", spec, "--no-llm"], {
+      encoding: "utf8",
+      cwd: bare,
+      env: { ...process.env, AIOS_TOOLKIT_DIR: path.join(bare, "definitely-not-a-toolkit") },
+    });
+    // 4 is the documented usage/IO code shared with `--rubric <missing>`. Before AIO-686 the
+    // fallback was a plain string and could not fail; now it resolves through getToolkit(), which
+    // throws — and an unhandled throw would surface as 1.
+    assert.equal(r.status, 4, `expected exit 4, got ${r.status}: ${r.stderr}`);
+    // The message must stay actionable, not become a bare stack trace.
+    assert.match(r.stderr, /cannot locate the AIOS toolkit/);
+    assert.match(r.stderr, /AIOS_TOOLKIT_DIR/, "the error must name the env var that fixes it");
+  } finally {
+    rmSync(bare, { recursive: true, force: true });
+  }
+});
+
 test(
   "eval in a rubric-less repo falls back to the toolkit rubric (no exit 4)",
   {
-    // KNOWN DEVTOOLS GAP, not a weakened test. This asserts the Team-Brain case: a repo with no
-    // .claude/rubrics/ must still grade, against the toolkit's own rubric, instead of dying with
-    // exit 4. In devtools it dies with exit 4 — because scripts/spec-checks/rubric.mjs's fallback
-    // (TOOLKIT_RUBRIC_PATH) is still MODULE-RELATIVE, resolving to <devtools>/.claude/rubrics/
-    // spec-readiness.md, which does not exist here and must not: the rubric is core-owned content
-    // and vendoring it would violate docs/devtools-toolkit-contract.md. The fix is copy-ledger
-    // item #13 — "replace module-relative rubric fallback with toolkit resolution" — i.e. route
-    // it through loadToolkitModule()/locateToolkit(). Un-skip when #13 lands. Verified failing:
-    // `cd <bare-dir> && node scripts/cli.mjs spec eval issue.md --no-llm`
-    //   → "error: rubric not found: <devtools>/.claude/rubrics/spec-readiness.md", exit 4.
-    skip:
-      "blocked on docs/copy-ledger.md #13: spec-checks/rubric.mjs's toolkit-rubric fallback is " +
-      "module-relative, so a rubric-less repo hard-fails (exit 4) in standalone devtools",
+    // The Team-Brain case: a repo with no .claude/rubrics/ must still grade, against the TOOLKIT's
+    // own rubric, instead of dying with exit 4.
+    //
+    // This was skipped as a KNOWN DEVTOOLS GAP while copy-ledger #13 was open —
+    // scripts/spec-checks/rubric.mjs's fallback was MODULE-RELATIVE, so standalone devtools
+    // resolved <devtools>/.claude/rubrics/spec-readiness.md, which does not exist here and must
+    // not: the rubric is core-owned and vendoring it would violate
+    // docs/devtools-toolkit-contract.md. #13 has landed (AIO-686) — the fallback now resolves
+    // through the toolkit contract — so this runs on the normal toolkit-dependent skip, which is
+    // what makes the pinned-toolkit and core-main lanes actually execute it.
+    skip: SKIP,
   },
   () => {
     const bare = mkdtempSync(path.join(tmpdir(), "brain-like-repo-"));
