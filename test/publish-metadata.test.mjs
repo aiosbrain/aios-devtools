@@ -150,3 +150,36 @@ test("every advertised entrypoint exists and ships inside `files`", () => {
     );
   }
 });
+
+// The lockfile carries its OWN copy of the root package's license, and npm does not keep the
+// two in step. `0.2.1` shipped with an AGPL manifest and a lockfile that still said MIT: the
+// upstream relicense bumped no version, so nothing forced the pair to be re-derived together.
+// A registry artifact that disagrees with itself about its licence is exactly the ambiguity a
+// relicense exists to remove.
+test("the lockfile agrees with the manifest about version and license", () => {
+  const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
+  assert.equal(lock.name, pkg.name, "lockfile name must match the manifest");
+  assert.equal(lock.version, pkg.version, "lockfile version must match the manifest");
+  assert.equal(
+    lock.packages?.[""]?.version,
+    pkg.version,
+    "the lockfile's root package entry must match the manifest version"
+  );
+  assert.equal(
+    lock.packages?.[""]?.license,
+    pkg.license,
+    "the lockfile's root package license must match the manifest — they drifted for all of 0.2.1"
+  );
+});
+
+// CHANGELOG.md is in `files`, so it ships inside the immutable tarball. If it is written after
+// the bump, that version's own changelog can never name what the version changed.
+test("the shipped changelog names the version being published", () => {
+  assert.ok(pkg.files.includes("CHANGELOG.md"), "CHANGELOG.md must ship in the tarball");
+  const changelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
+  assert.match(
+    changelog,
+    new RegExp(`^## \\[${pkg.version.replace(/\./g, "\\.")}\\]`, "m"),
+    `CHANGELOG.md must contain a '## [${pkg.version}]' section — publish-npm.yml gates on it`
+  );
+});
