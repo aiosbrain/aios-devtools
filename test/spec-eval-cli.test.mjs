@@ -112,6 +112,30 @@ test(
   }
 );
 
+// Deliberately NOT toolkit-gated: this asserts what happens when there is NO usable toolkit, so a
+// toolkit-dependent skip would hide exactly the case under test. It only needs the CLI to run.
+test("an unlocatable toolkit exits 4 like every other rubric-load failure, not 1", () => {
+  const bare = mkdtempSync(path.join(tmpdir(), "no-toolkit-repo-"));
+  try {
+    const spec = path.join(bare, "issue.md");
+    writeFileSync(spec, readFileSync(STRONG, "utf8"));
+    const r = spawnSync(process.execPath, [CLI, "spec", "eval", spec, "--no-llm"], {
+      encoding: "utf8",
+      cwd: bare,
+      env: { ...process.env, AIOS_TOOLKIT_DIR: path.join(bare, "definitely-not-a-toolkit") },
+    });
+    // 4 is the documented usage/IO code shared with `--rubric <missing>`. Before AIO-686 the
+    // fallback was a plain string and could not fail; now it resolves through getToolkit(), which
+    // throws — and an unhandled throw would surface as 1.
+    assert.equal(r.status, 4, `expected exit 4, got ${r.status}: ${r.stderr}`);
+    // The message must stay actionable, not become a bare stack trace.
+    assert.match(r.stderr, /cannot locate the AIOS toolkit/);
+    assert.match(r.stderr, /AIOS_TOOLKIT_DIR/, "the error must name the env var that fixes it");
+  } finally {
+    rmSync(bare, { recursive: true, force: true });
+  }
+});
+
 test(
   "eval in a rubric-less repo falls back to the toolkit rubric (no exit 4)",
   {

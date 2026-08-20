@@ -1124,10 +1124,15 @@ export async function cmdSpec(repo, args) {
     process.exit(4);
   }
 
-  const rubricPath = resolveRubricPath(repo, flag("--rubric"));
   let rubric;
   try {
-    rubric = loadRubric(rubricPath);
+    // RESOLUTION IS INSIDE THE TRY, not above it. Since AIO-686 the toolkit fallback resolves
+    // through `getToolkit()`, which THROWS when no toolkit can be located — so an unlocatable
+    // toolkit is now a way for rubric selection itself to fail, not just rubric loading. Resolving
+    // outside this block printed the right actionable message and then exited 1 (an unhandled
+    // throw) instead of the documented 4 that every other "could not load the rubric" path uses,
+    // including `--rubric <missing>`. Same class of failure, same exit code.
+    rubric = loadRubric(resolveRubricPath(repo, flag("--rubric")));
   } catch (e) {
     console.error(c.red(`error: ${e.message}`));
     process.exit(4);
