@@ -1,0 +1,10 @@
+{
+  "all": true,
+  "include": ["scripts/**/*.mjs", "hooks/**/*.mjs", "validation/**/*.mjs"],
+  "exclude": ["**/*.test.*", "test/**", "coverage/**", "scripts/check-copy-parity.mjs"],
+  "exclude-after-remap": true,
+  "extension": [".js", ".mjs"],
+  "reporter": ["lcov", "json-summary", "text-summary"],
+  "reports-dir": "coverage",
+  "clean": true
+}

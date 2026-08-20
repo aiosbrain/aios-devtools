@@ -77,6 +77,36 @@ jobs:
         if: steps.brain.outputs.configured == 'true'
         run: npm install -g @aiosbrain/aios@0.9.1 --ignore-scripts
 
+      # Most of this repo's suite is toolkit-dependent: without AIOS_TOOLKIT_DIR those tests
+      # skip with a named reason by design (docs/devtools-toolkit-contract.md). Measured on this
+      # branch: 48.93% of lines without a toolkit vs 77.68% with one, 91 skipped tests vs 3. A
+      # toolkit-less coverage run would understate the repo by ~29 points forever, so the coverage
+      # step gets the SAME exact-SHA toolkit pin the `unit tests` job in ci.yml uses.
+      #
+      # This checkout is credential-free on both axes: persist-credentials is false, and no Brain
+      # credential reaches this step or the provision/coverage steps below — test/ci-security.test.mjs
+      # asserts the Brain key exists only in the configuration probe and the final upload.
+      # --ignore-scripts keeps toolkit lifecycle scripts from running; the one build this repo's
+      # suite actually needs is invoked explicitly.
+      - name: Checkout AIOS toolkit (pinned — makes the toolkit-dependent suites run)
+        if: steps.brain.outputs.configured == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: aiosbrain/aios-workspace
+          # SYNC: the same AIO-663 contract pin as ci.yml's `unit tests` job and the
+          # PINNED_TOOLKIT_SHA constant in test/ci-security.test.mjs. Bump all three together.
+          ref: 3d92e89f452e9393944c4485238c3a2350efb6db
+          path: toolkit-checkout
+          persist-credentials: false
+
+      - name: Provision toolkit (deps + operator-loop dist)
+        if: steps.brain.outputs.configured == 'true'
+        continue-on-error: true # coverage is a metrics source, never a gate
+        working-directory: toolkit-checkout
+        run: |
+          npm ci --ignore-scripts
+          npm run build:loop --if-present
+
       # Optional: most workspaces are content repos with no suite, and that is fine — coverage
       # then reports as "no report", NOT as 0%. Only run it when the workspace actually defines
       # the script and has a lockfile. Never let it fail the scan: this is a metrics source, not
@@ -84,6 +114,8 @@ jobs:
       # an explicit, auditable execution step.
       - name: Generate coverage (only if this workspace has a suite)
         if: steps.brain.outputs.configured == 'true'
+        env:
+          AIOS_TOOLKIT_DIR: ${{ github.workspace }}/toolkit-checkout
         run: |
           if [ -f package-lock.json ] && node -e "process.exit(require('./package.json').scripts?.['test:coverage'] ? 0 : 1)" 2>/dev/null; then
             echo "test:coverage found — running it."
@@ -95,6 +127,13 @@ jobs:
           else
             echo "no locked test:coverage suite — skipping (coverage will report as 'no report')."
           fi
+
+      # The pinned toolkit checkout lives inside the scanned tree. Left in place it would be
+      # counted as this repo's source (and its coverage/ would shadow ours), so remove it
+      # before the analyzer reads the working tree.
+      - name: Remove the toolkit checkout before scanning
+        if: steps.brain.outputs.configured == 'true'
+        run: rm -rf toolkit-checkout
 
       - name: Compute codebase health
         if: steps.brain.outputs.configured == 'true'
