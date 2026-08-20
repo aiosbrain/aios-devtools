@@ -115,19 +115,17 @@ test(
 test(
   "eval in a rubric-less repo falls back to the toolkit rubric (no exit 4)",
   {
-    // KNOWN DEVTOOLS GAP, not a weakened test. This asserts the Team-Brain case: a repo with no
-    // .claude/rubrics/ must still grade, against the toolkit's own rubric, instead of dying with
-    // exit 4. In devtools it dies with exit 4 — because scripts/spec-checks/rubric.mjs's fallback
-    // (TOOLKIT_RUBRIC_PATH) is still MODULE-RELATIVE, resolving to <devtools>/.claude/rubrics/
-    // spec-readiness.md, which does not exist here and must not: the rubric is core-owned content
-    // and vendoring it would violate docs/devtools-toolkit-contract.md. The fix is copy-ledger
-    // item #13 — "replace module-relative rubric fallback with toolkit resolution" — i.e. route
-    // it through loadToolkitModule()/locateToolkit(). Un-skip when #13 lands. Verified failing:
-    // `cd <bare-dir> && node scripts/cli.mjs spec eval issue.md --no-llm`
-    //   → "error: rubric not found: <devtools>/.claude/rubrics/spec-readiness.md", exit 4.
-    skip:
-      "blocked on docs/copy-ledger.md #13: spec-checks/rubric.mjs's toolkit-rubric fallback is " +
-      "module-relative, so a rubric-less repo hard-fails (exit 4) in standalone devtools",
+    // The Team-Brain case: a repo with no .claude/rubrics/ must still grade, against the TOOLKIT's
+    // own rubric, instead of dying with exit 4.
+    //
+    // This was skipped as a KNOWN DEVTOOLS GAP while copy-ledger #13 was open —
+    // scripts/spec-checks/rubric.mjs's fallback was MODULE-RELATIVE, so standalone devtools
+    // resolved <devtools>/.claude/rubrics/spec-readiness.md, which does not exist here and must
+    // not: the rubric is core-owned and vendoring it would violate
+    // docs/devtools-toolkit-contract.md. #13 has landed (AIO-686) — the fallback now resolves
+    // through the toolkit contract — so this runs on the normal toolkit-dependent skip, which is
+    // what makes the pinned-toolkit and core-main lanes actually execute it.
+    skip: SKIP,
   },
   () => {
     const bare = mkdtempSync(path.join(tmpdir(), "brain-like-repo-"));
