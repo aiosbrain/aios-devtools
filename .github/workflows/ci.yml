@@ -187,17 +187,23 @@ jobs:
   # (seam-dependent suites skip with a NAMED reason, never crash) exactly as a fresh
   # `npm install @aiosbrain/aios-devtools` consumer without a workspace would see it.
   test-no-toolkit:
-    name: tests (no toolkit)
+    name: tests (no toolkit, Node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24, 26]
     permissions:
       contents: read
+    env:
+      npm_config_engine_strict: "true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
       - name: Install dependencies
         run: npm ci
       - name: Test without a toolkit (AIOS_TOOLKIT_DIR unset)
@@ -297,17 +303,23 @@ jobs:
   # files allowlist, install the tarball into a fresh temp project, run the installed
   # `aios-devtools` bin and resolve the exports map (test/pack-install.test.mjs).
   pack-verify:
-    name: pack and install verification
+    name: pack and install verification (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24, 26]
     permissions:
       contents: read
+    env:
+      npm_config_engine_strict: "true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
       - name: Install dependencies
         run: npm ci
       - name: Pack, verify tarball contents, install into a temp project, run the bin
