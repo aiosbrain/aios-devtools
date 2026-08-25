@@ -12,11 +12,10 @@
 #   2. ~/.config/aios-nda/leak-gate-terms.sh  (default local install), else
 #   3. $AIOS_LEAK_TERMS_B64                    (base64 of the same file — for CI via a repo secret)
 # The terms file is shell-sourceable and defines three vars: STRONG, WORDS, PATTERNS
-# (each a grep -E alternation). See leak-gate-terms.example.sh for the format.
+# (each a grep -E alternation).
 #
-# If no term set is configured, the gate runs in NO-OP mode (prints a notice, exits 0):
-# the standing protection is the local write-time PreToolUse hook + the pre-commit hook,
-# which read the same term file. Set $AIOS_LEAK_TERMS_B64 as a CI secret to enforce in CI too.
+# If no term set is configured, the gate still enforces baseline shape rules, then reports
+# SKIPPED with exit 0 to distinguish that reduced coverage from a full term-set pass.
 #
 # ── OUTPUT CONTAINMENT: the gate must not become the leak ────────────────────
 # This gate used to print the matching `grep -n` lines. That wrote the very identifier it
@@ -106,19 +105,23 @@ fi
 # `aios timeline`, the change-set dir from `aios build`) keep the walk — they hold only
 # the material being gated, so there is no ignored tree to descend into.
 #
-# Exclusions still applied on top: VCS, this script, binaries, LICENSE (copyright holder),
-# vendored upstream skills, and deliberately-malicious scanner test fixtures.
+# Exclusions still applied on top: VCS, binaries, LICENSE (copyright holder), vendored
+# upstream skills, and deliberately-malicious scanner test fixtures.
 # skill-library/ — vendored, integrity-locked official upstream skills (OGR09).
 # skill-scan-fixtures/ — DELIBERATELY-malicious scanner test inputs; never shipped.
 # target/ — Rust/Tauri build output; gitignored. evidence/ — gitignored UX harness output.
-# .env* — local-only config (gitignored).
+# .env / .env.local* / .env.keys* — local-only config and dotenvx key material, including
+#   rotation and backup copies (`.env.keys.bak-<date>`). Exact-match patterns missed those,
+#   so the shapes are globbed. `.env.example` is deliberately NOT skipped: it is tracked,
+#   published, and must be scanned like any other shipped file.
 # (docs/strategy/ was deleted from the repo entirely (PR #336) — nothing strategy-related is
 #  excluded; the full docs tree is scanned like everything else.)
 FILE_LIST=$(mktemp "${TMPDIR:-/tmp}/aios-leak-gate.XXXXXX")
 PATH_LIST=$(mktemp "${TMPDIR:-/tmp}/aios-leak-paths.XXXXXX")
 SYMLINK_PAYLOADS=$(mktemp "${TMPDIR:-/tmp}/aios-leak-symlinks.XXXXXX")
 MATCH_LIST=$(mktemp "${TMPDIR:-/tmp}/aios-leak-match.XXXXXX")
-trap 'rm -f "$FILE_LIST" "$PATH_LIST" "$SYMLINK_PAYLOADS" "$MATCH_LIST"' EXIT
+FRONTMATTER_SCOPE=$(mktemp "${TMPDIR:-/tmp}/aios-leak-frontmatter.XXXXXX")
+trap 'rm -f "$FILE_LIST" "$PATH_LIST" "$SYMLINK_PAYLOADS" "$MATCH_LIST" "$FRONTMATTER_SCOPE"' EXIT
 
 # Path-shape rules must still see symlinks: a public tree path can disclose client/workspace
 # structure even when its entry is a symlink whose content scanner correctly refuses to follow.
@@ -135,8 +138,8 @@ emit_if_scannable() {
   case "/$1" in
     */.git/* | */node_modules/* | */.venv/* | */__pycache__/* | */store/*) return 0 ;;
     */skill-library/* | */skill-scan-fixtures/* | */target/* | */evidence/*) return 0 ;;
-    */.git | */.env | */.env.local | */.env.keys) return 0 ;;
-    */leak-gate.sh | */leak-gate-terms.sh | */LICENSE) return 0 ;;
+    */.git | */.env | */.env.local* | */.env.keys*) return 0 ;;
+    */LICENSE) return 0 ;;
     *.png | *.jpg | *.pdf | *.lock) return 0 ;;
   esac
   local abs="$ROOT/$1"
@@ -352,9 +355,21 @@ if [ "$IS_PRODUCT_REPO" -eq 1 ] && [ -s "$FILE_LIST" ]; then
     # Read the WHOLE frontmatter block when the file opens one: a fixed line window let a long
     # header push `access:` out of view and evade the owner-tier rule. Files with no frontmatter
     # delimiters keep the original bounded window, so this only ever widens coverage.
-    frontmatter_scope "$f" 2>/dev/null |
-      grep -qiE "^access:[[:space:]]*['\"]?[[:space:]]*(admin|private)[[:space:]]*['\"]?[[:space:]]*(#.*)?$" &&
-      printf '%s\0' "$f" >> "$MATCH_LIST"
+    if ! frontmatter_scope "$f" > "$FRONTMATTER_SCOPE" 2>/dev/null; then
+      echo "leak-gate: ERROR — frontmatter scan could not complete; refusing to report clean." >&2
+      exit 2
+    fi
+    frontmatter_rc=0
+    grep -qiE "^access:[[:space:]]*['\"]?[[:space:]]*(admin|private)[[:space:]]*['\"]?[[:space:]]*(#.*)?$" \
+      "$FRONTMATTER_SCOPE" >/dev/null 2>&1 || frontmatter_rc=$?
+    case "$frontmatter_rc" in
+      0) printf '%s\0' "$f" >> "$MATCH_LIST" ;;
+      1) ;;
+      *)
+        echo "leak-gate: ERROR — frontmatter scan could not complete; refusing to report clean." >&2
+        exit 2
+        ;;
+    esac
   done < "$FILE_LIST"
   if [ -s "$MATCH_LIST" ]; then
     fail=1
