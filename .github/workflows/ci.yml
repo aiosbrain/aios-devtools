@@ -209,6 +209,27 @@ jobs:
       - name: Test without a toolkit (AIOS_TOOLKIT_DIR unset)
         run: npm test
 
+  # Compatibility context for branch protection. The matrix above deliberately keeps its
+  # per-Node check names, while this job publishes the pre-matrix generic context. `always()`
+  # prevents an upstream failure, cancellation, or skip from skipping this check; the exact
+  # result comparison below then fails closed for every outcome other than full matrix success.
+  test-no-toolkit-required:
+    name: tests (no toolkit)
+    needs: [test-no-toolkit]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require every no-toolkit matrix entry to succeed
+        env:
+          MATRIX_RESULT: ${{ needs.test-no-toolkit.result }}
+        run: |
+          if [ "$MATRIX_RESULT" != "success" ]; then
+            echo "::error::tests (no toolkit) matrix concluded '$MATRIX_RESULT'; every Node entry must succeed."
+            exit 1
+          fi
+
   # AIO-663 — the copy ledger, enforced. `docs/copy-ledger.md` tracked 17 files duplicated
   # between this repo and core for two weeks with nothing checking them; six had drifted by
   # 2026-08-16, three behaviourally (see the ledger's "Why this was needed" section).
@@ -324,3 +345,19 @@ jobs:
         run: npm ci
       - name: Pack, verify tarball contents, install into a temp project, run the bin
         run: node --test --test-force-exit test/pack-install.test.mjs
+
+  # Compatibility context for branch protection, with the same fail-closed semantics as
+  # `tests (no toolkit)` above. This job cannot go green after a failed, cancelled, or skipped
+  # matrix because it runs unconditionally and accepts only `needs.pack-verify.result=success`.
+  pack-verify-required:
+    name: pack and install verification
+    needs: [pack-verify]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require every pack/install matrix entry to succeed
+        env:
+          MATRIX_RESULT: ${{ needs.pack-verify.result }}
+        run: test "$MATRIX_RESULT" = "success"

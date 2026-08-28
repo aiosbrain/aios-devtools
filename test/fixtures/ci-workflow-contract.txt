@@ -151,6 +151,23 @@ jobs:
         run: npm ci
       - name: Test without a toolkit (AIOS_TOOLKIT_DIR unset)
         run: npm test
+  test-no-toolkit-required:
+    name: tests (no toolkit)
+    needs: [test-no-toolkit]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require every no-toolkit matrix entry to succeed
+        env:
+          MATRIX_RESULT: ${{ needs.test-no-toolkit.result }}
+        run: |
+          if [ "$MATRIX_RESULT" != "success" ]; then
+            echo "::error::tests (no toolkit) matrix concluded '$MATRIX_RESULT'; every Node entry must succeed."
+            exit 1
+          fi
+
   copy-parity:
     name: copy parity (core main)
     runs-on: ubuntu-latest
@@ -221,3 +238,15 @@ jobs:
         run: npm ci
       - name: Pack, verify tarball contents, install into a temp project, run the bin
         run: node --test --test-force-exit test/pack-install.test.mjs
+  pack-verify-required:
+    name: pack and install verification
+    needs: [pack-verify]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require every pack/install matrix entry to succeed
+        env:
+          MATRIX_RESULT: ${{ needs.pack-verify.result }}
+        run: test "$MATRIX_RESULT" = "success"
