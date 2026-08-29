@@ -130,21 +130,44 @@ jobs:
           if [ -f package.json ]; then npm run test --if-present; else echo "no package.json — skipping tests"; fi
 
   test-no-toolkit:
-    name: tests (no toolkit)
+    name: tests (no toolkit, Node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24, 26]
     permissions:
       contents: read
+    env:
+      npm_config_engine_strict: "true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
       - name: Install dependencies
         run: npm ci
       - name: Test without a toolkit (AIOS_TOOLKIT_DIR unset)
         run: npm test
+  test-no-toolkit-required:
+    name: tests (no toolkit)
+    needs: [test-no-toolkit]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require every no-toolkit matrix entry to succeed
+        env:
+          MATRIX_RESULT: ${{ needs.test-no-toolkit.result }}
+        run: |
+          if [ "$MATRIX_RESULT" != "success" ]; then
+            echo "::error::tests (no toolkit) matrix concluded '$MATRIX_RESULT'; every Node entry must succeed."
+            exit 1
+          fi
+
   copy-parity:
     name: copy parity (core main)
     runs-on: ubuntu-latest
@@ -194,18 +217,36 @@ jobs:
       - name: Test on the publish lane's npm (AIOS_TOOLKIT_DIR unset)
         run: npm test
   pack-verify:
-    name: pack and install verification
+    name: pack and install verification (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24, 26]
     permissions:
       contents: read
+    env:
+      npm_config_engine_strict: "true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
       - name: Install dependencies
         run: npm ci
       - name: Pack, verify tarball contents, install into a temp project, run the bin
         run: node --test --test-force-exit test/pack-install.test.mjs
+  pack-verify-required:
+    name: pack and install verification
+    needs: [pack-verify]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require every pack/install matrix entry to succeed
+        env:
+          MATRIX_RESULT: ${{ needs.pack-verify.result }}
+        run: test "$MATRIX_RESULT" = "success"

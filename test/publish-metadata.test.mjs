@@ -36,6 +36,7 @@ const REPO_URL = `https://github.com/${ORG}/${REPO}`;
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pkg = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+const SUPPORTED_NODE_RANGE = "22.x || 24.x || 26.x";
 
 // The registry compares the *normalized* repository URL against the provenance
 // subject: a leading `git+` scheme prefix and a trailing `.git` are stripped, as
@@ -116,6 +117,19 @@ test("name, version, license and publishConfig satisfy the registry", () => {
   );
 });
 
+test("the package declares the complete supported Node contract", () => {
+  assert.equal(
+    pkg.engines?.node,
+    SUPPORTED_NODE_RANGE,
+    `engines.node must be exactly ${SUPPORTED_NODE_RANGE}`
+  );
+  assert.equal(
+    pkg.dependencies?.["@aiosbrain/foundation"],
+    "^0.1.2",
+    "the foundation floor must exclude 0.1.0, whose engine rejects Node 24 and 26"
+  );
+});
+
 test("every advertised entrypoint exists and ships inside `files`", () => {
   // Not a 422 risk, but the other way a publish "succeeds" and is broken: `files`
   // is an allowlist, so an entrypoint outside it resolves locally and 404s for
@@ -169,6 +183,21 @@ test("the lockfile agrees with the manifest about version and license", () => {
     lock.packages?.[""]?.license,
     pkg.license,
     "the lockfile's root package license must match the manifest — they drifted for all of 0.2.1"
+  );
+  assert.equal(
+    lock.packages?.[""]?.engines?.node,
+    SUPPORTED_NODE_RANGE,
+    "the lockfile root engine must match the manifest exactly"
+  );
+  assert.equal(
+    lock.packages?.[""]?.dependencies?.["@aiosbrain/foundation"],
+    "^0.1.2",
+    "the lockfile root must preserve the supported foundation floor"
+  );
+  assert.equal(
+    lock.packages?.["node_modules/@aiosbrain/foundation"]?.version,
+    "0.1.2",
+    "the candidate lock must resolve the first published foundation compatible with Node 22/24/26"
   );
 });
 
