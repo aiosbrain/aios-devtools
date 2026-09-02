@@ -54,6 +54,12 @@ byte-identical to core and machine-enforced, but they are still *duplicates* —
 `unresolved`. The two columns answer different questions: Status is "who will own this", Byte
 parity is "can it rot while we decide".
 
+Rows 1–17 are the AIO-594 cut set. Rows 18–19 were added by the **AIO-1072 companion
+mirror** (core's `resolveDistributionRoot` cutover): row 16 now imports
+`scripts/cli/distribution-root.mjs` via the `scripts/cli.mjs` barrel, so the classifier is a
+new enforced copy (row 18) and the same-path-different-module `cli.mjs` seam is declared
+exempt (row 19) rather than left as an unexamined divergence.
+
 | # | Temporary copy | Required disposition | Status | Byte parity | Linear issue |
 |---|----------------|----------------------|--------|-------------|--------------|
 | 1 | `scripts/relay-core.mjs` | foundation export or Devtools-owned | unresolved | enforced | AIO-663 (entangled with AIO-684) |
@@ -73,6 +79,8 @@ parity is "can it rot while we decide".
 | 15 | `scripts/scan-file.mjs` | foundation scan export | unresolved | enforced | AIO-663 |
 | 16 | `scripts/toolkit-locate.mjs` | foundation locator export or separately versioned identical contract implementation | unresolved | enforced | AIO-663 |
 | 17 | `docs/devtools-toolkit-contract.md` | Devtools canonical; Workspace retains a short consumer contract/link | unresolved | exempt (this repo is the canonical owner by disposition; core keeps a shorter consumer-side contract. The two are deliberately different documents, not copies) | AIO-663 |
+| 18 | `scripts/cli/distribution-root.mjs` | moves with row 16 — toolkit-locate's one distribution-root classifier (AIO-635 Decision 3); whatever disposition row 16 gets, this dependency goes with it | unresolved | enforced | AIO-663 |
+| 19 | `scripts/cli.mjs` | not a copy — same PATH, different module. Core's is the workspace CLI barrel over `scripts/cli/**`; this repo's is the `aios-devtools` bin, which additionally re-exports row 18's distribution-root surface because row 16's byte-identical copy imports `"./cli.mjs"`. Terminal state: resolves with row 16 (a foundation locator export removes the barrel duty) | unresolved | exempt (deliberately different modules sharing a path; the bin must keep re-exporting `DISTRIBUTION_MARKERS` / `missingDistributionMarkers` / `isDistributionRoot` — and stay side-effect-free on import — for row 16 to work) | AIO-663 |
 
 Governance-stamp files (`scripts/check-file-size.mjs`, `scripts/check-boundaries.mjs`,
 `scripts/git-files.mjs`, `scripts/leak-gate.sh`, `validation/agent-readiness-lib.mjs`,

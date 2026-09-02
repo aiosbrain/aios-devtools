@@ -15,10 +15,25 @@
 // The aios-workspace `aios` front door remains authoritative for its own help output and
 // registry resolution modes; this bin is the standalone package's stable entry, and the
 // seam a future Workspace dispatch adapter can delegate to.
+//
+// BARREL DUTY (AIO-1072 companion): core's `scripts/cli.mjs` is a pure barrel over
+// `scripts/cli/**`, and the byte-enforced copy of `scripts/toolkit-locate.mjs`
+// (docs/copy-ledger.md row 16) imports its distribution-root surface from "./cli.mjs".
+// This file therefore ALSO re-exports `scripts/cli/distribution-root.mjs` under the same
+// names, and only runs the dispatcher when executed as the entrypoint — importing this
+// module must never dispatch a command.
 
 import path from "node:path";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+
+export {
+  resolveDistributionRoot,
+  isDistributionRoot,
+  missingDistributionMarkers,
+  DISTRIBUTION_MARKERS,
+  DISTRIBUTION_PACKAGE,
+} from "./cli/distribution-root.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -106,7 +121,21 @@ async function main() {
   process.exit(typeof code === "number" ? code : 0);
 }
 
-main().catch((e) => {
-  process.stderr.write(`aios-devtools: error: ${e?.message ?? String(e)}\n`);
-  process.exit(1);
-});
+// Dispatch only when run as the entrypoint (`node scripts/cli.mjs …` or the installed
+// `aios-devtools` bin — argv[1] is realpathed because npm bins are symlinks). A plain
+// `import "./cli.mjs"` (toolkit-locate's barrel import) must never dispatch.
+function invokedAsEntrypoint() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+}
+
+if (invokedAsEntrypoint()) {
+  main().catch((e) => {
+    process.stderr.write(`aios-devtools: error: ${e?.message ?? String(e)}\n`);
+    process.exit(1);
+  });
+}
