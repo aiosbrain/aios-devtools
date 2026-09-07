@@ -24,8 +24,8 @@ test("the ledger table parses and every row declares a parity mode", () => {
   const rows = parseLedgerRows(ledger);
   assert.equal(
     rows.length,
-    19,
-    "17 AIO-594 cut copies + 2 AIO-1072 rows (distribution-root classifier enforced, " +
+    20,
+    "17 AIO-594 cut copies + 3 AIO-1072 rows (pure classifier and compatibility export enforced, " +
       "same-path cli.mjs seam exempt); changing the count is a ledger decision"
   );
   for (const row of rows) {

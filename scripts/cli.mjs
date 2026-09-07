@@ -16,12 +16,9 @@
 // registry resolution modes; this bin is the standalone package's stable entry, and the
 // seam a future Workspace dispatch adapter can delegate to.
 //
-// BARREL DUTY (AIO-1072 companion): core's `scripts/cli.mjs` is a pure barrel over
-// `scripts/cli/**`, and the byte-enforced copy of `scripts/toolkit-locate.mjs`
-// (docs/copy-ledger.md row 16) imports its distribution-root surface from "./cli.mjs".
-// This file therefore ALSO re-exports `scripts/cli/distribution-root.mjs` under the same
-// names, and only runs the dispatcher when executed as the entrypoint — importing this
-// module must never dispatch a command.
+// Compatibility exports retain the classifier surface from the companion candidate.
+// Shared locator code imports the pure top-level distribution-root module directly;
+// it never imports this devtools dispatcher. Imports still must not dispatch a command.
 
 import path from "node:path";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
