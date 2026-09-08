@@ -109,6 +109,11 @@ test("finding identity covers legacy heading bodies and mixed CodeRabbit dialect
     issueComments: [{ body: "_⚠️ Potential issue_\n\n**Major:** Null input crashes.\n\nThis is a minor change to the guard." }],
   }, opts);
   assert.deepEqual(oneFinding.candidates.map((x) => x.severity), ["high"]);
+  const bundled = normalizeFindingInventory({
+    ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null, checks: { checks: [] }, issueComments: [],
+    reviews: [{ body: "_⚠️ Potential issue_ | _🟠 Major_\n\n**Null input crashes.**\n\n_⚠️ Potential issue_ | _🟡 Minor_\n\n**Fallback is incorrect.**" }],
+  }, opts);
+  assert.deepEqual(bundled.candidates.map((x) => x.severity).sort(), ["high", "medium"]);
 });
 
 test("opt-in inventory preserves GPT findings beyond the model prompt cap", async () => {
@@ -345,6 +350,7 @@ test("structured prompt contains opaque keys but not source prose", () => {
   assert.match(prompt, /taxonomy\.fences.*sorted, unique, non-empty array/);
   assert.match(prompt, /evidence_status.*complete for verified\/duplicate\/rejected/);
   assert.equal(prompt.includes(`Allowed codebases: ${JSON.stringify([...new Set(Object.values(multiRegistry.codebase_mappings))].sort())}`), true);
+  assert.equal(prompt.includes(`The required source codebase is ${JSON.stringify(inventory.codebase)}`), true);
 });
 
 test("opt-in model failure retains exit 1 and writes partial observations", async () => {

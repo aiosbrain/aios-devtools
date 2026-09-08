@@ -18,7 +18,6 @@ import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import { extractFindingSeverityRecords } from "./finding-severity-records.mjs";
 import { checkIsPending, checkIsRed } from "./ci-status.mjs";
-
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONTRACTS = path.join(HERE, "..", "contracts");
 export const SCHEMA_PATH = path.join(CONTRACTS, "finding-observations.v1.schema.json");
@@ -139,15 +138,23 @@ function codeRabbitRecords(body, item) {
       : /^\s*_[^A-Za-z0-9]*nitpick_\s*$/i.test(lineText) ? "low" : null;
     if (severity) found.push({ line: index + 1, severity });
   }
+  const potentialLines = lines.flatMap((line, index) => /potential issue/i.test(line) ? [{ line: index + 1, text: line }] : []);
+  for (const [index, potential] of potentialLines.entries()) {
+    if (found.some((record) => record.line === potential.line)) continue;
+    const token = potential.text.match(/(major|minor|nitpick)/i)?.[1]?.toLowerCase();
+    const next = potentialLines[index + 1]?.line ?? lines.length + 1;
+    const hasFollowingLabel = found.some((record) => record.line > potential.line && record.line < next);
+    if (!token && hasFollowingLabel) continue;
+    found.push({ line: potential.line, severity: token === "minor" ? "medium" : token === "nitpick" ? "low" : "high" });
+  }
   found.sort((a, b) => a.line - b.line);
   if (found.length) return found.map(({ line, severity }, index) => ({
     severity,
     evidence_sha256: sha256(lines.slice(line - 1, (found[index + 1]?.line ?? lines.length + 1) - 1).join("\n")),
     source_locator: { kind: "item-line", item, line },
   }));
-  const potentialLine = lines.findIndex((line) => /potential issue/i.test(line));
-  return potentialLine >= 0 || /severity/i.test(text)
-    ? [{ severity: potentialLine >= 0 ? "high" : "unknown", evidence_sha256: sha256(text), source_locator: { kind: "item-line", item, line: Math.max(1, potentialLine + 1) } }]
+  return /severity/i.test(text)
+    ? [{ severity: "unknown", evidence_sha256: sha256(text), source_locator: { kind: "item-line", item, line: 1 } }]
     : [];
 }
 
@@ -250,6 +257,7 @@ export function buildFindingEnvelopePrompt(basePrompt, inventory) {
     'of none/migration/credential/schema/public-api/release/unknown; none and unknown cannot be combined with another fence. ' +
     '`evidence_status` is complete, incomplete, or unknown: it must be complete for verified/duplicate/rejected, ' +
     'and incomplete or unknown for incomplete. `codebases` is a sorted, unique, non-empty array including the source codebase. ' +
+    `The required source codebase is ${JSON.stringify(inventory.codebase)}. ` +
     `Allowed codebases: ${JSON.stringify(inventory.allowed_codebases)}. ` +
     `Opaque inventory: ${JSON.stringify(opaque)}\n`;
 }
