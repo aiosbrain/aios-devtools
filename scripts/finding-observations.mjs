@@ -106,22 +106,32 @@ function resolvePartition(registry, issue, repoSlug) {
   return { codebase, issueRef };
 }
 
-const canonicalSeverities = (text, dialect = "canonical") => extractFindingSeverityRecords(text, { dialect }).map(({ severity }) => severity.toLowerCase());
+function textFindingRecords(text, dialect = "canonical") {
+  const lines = String(text ?? "").split("\n");
+  return extractFindingSeverityRecords(text, { dialect }).map(({ line, severity }) => ({
+    severity: severity.toLowerCase(),
+    evidence_sha256: sha256(lines[line - 1] ?? ""),
+    source_locator: { kind: "line", line },
+  }));
+}
 
-function codeRabbitSeverities(body) {
+function codeRabbitRecords(body, item) {
   const text = String(body ?? "");
   const structured = [...text.matchAll(/\*\*(critical|blocker|major|high|medium|minor|low|nitpick)(?:\s+severity)?(?::\*\*|\*\*\s*:)/gi)];
   const found = structured.map((m) => {
     const token = m[1].toLowerCase();
-    if (["critical", "blocker"].includes(token)) return "critical";
-    if (["major", "high"].includes(token)) return "high";
-    if (["medium", "minor"].includes(token)) return "medium";
-    return "low";
+    const severity = ["critical", "blocker"].includes(token) ? "critical"
+      : ["major", "high"].includes(token) ? "high"
+        : ["medium", "minor"].includes(token) ? "medium" : "low";
+    const line = text.slice(0, m.index).split("\n").length;
+    return { severity, evidence_sha256: sha256(text.split("\n")[line - 1] ?? ""), source_locator: { kind: "item-line", item, line } };
   });
   if (found.length) return found;
-  const listed = canonicalSeverities(text);
+  const listed = textFindingRecords(text).map((record) => ({ ...record, source_locator: { kind: "item-line", item, line: record.source_locator.line } }));
   if (listed.length) return listed;
-  return /potential issue|severity/i.test(text) ? ["unknown"] : [];
+  return /potential issue|severity/i.test(text)
+    ? [{ severity: "unknown", evidence_sha256: sha256(text), source_locator: { kind: "item-line", item, line: 1 } }]
+    : [];
 }
 
 function makeInventoryRecords(inputs) {
@@ -130,34 +140,34 @@ function makeInventoryRecords(inputs) {
   if (!inputs.checks?.checks?.length && (inputs.checks?.ciRed || inputs.checks?.ciPending)) {
     throw new Error("plaintext CI evidence has no trustworthy candidate denominator");
   }
-  sources.push({ source_type: "local-bugbot", severities: canonicalSeverities(inputs.localBugbotMarkdown) });
-  sources.push({ source_type: "gpt", severities: canonicalSeverities(inputs.gptMarkdown, "gpt") });
+  sources.push({ source_type: "local-bugbot", records: textFindingRecords(inputs.localBugbotMarkdown) });
+  sources.push({ source_type: "gpt", records: textFindingRecords(inputs.gptMarkdown, "gpt") });
   for (const [source_type, items] of [
     ["coderabbit-issue", inputs.issueComments], ["coderabbit-inline", inputs.inlineComments],
     ["coderabbit-review", inputs.reviews],
   ]) {
-    const severities = [];
-    for (const item of items ?? []) {
+    const records = [];
+    for (const [itemIndex, item] of (items ?? []).entries()) {
       if (!item || typeof item !== "object" || (item.body !== undefined && typeof item.body !== "string")) { malformed++; continue; }
-      severities.push(...codeRabbitSeverities(item.body));
+      records.push(...codeRabbitRecords(item.body, itemIndex));
     }
-    sources.push({ source_type, severities });
+    sources.push({ source_type, records });
   }
   const ci = [];
-  for (const check of inputs.checks?.checks ?? []) {
+  for (const [item, check] of (inputs.checks?.checks ?? []).entries()) {
     if (["fail", "cancel"].includes(check.bucket) || ["FAILURE", "CANCELLED", "ERROR", "TIMED_OUT"].includes(check.state)) {
-      ci.push("high");
+      ci.push({ severity: "high", evidence_sha256: sha256(canonical(check)), source_locator: { kind: "check", item } });
     } else if (check.bucket === "pending" || ["PENDING", "IN_PROGRESS", "QUEUED"].includes(check.state)) {
-      ci.push("unknown");
+      ci.push({ severity: "unknown", evidence_sha256: sha256(canonical(check)), source_locator: { kind: "check", item } });
     }
   }
-  sources.push({ source_type: "ci", severities: ci });
-  const candidates = sources.flatMap(({ source_type, severities }) => {
-    const ordered = [...severities].sort();
-    const source_artifact_sha256 = sha256(canonical({ source_type, severities: ordered }));
-    return ordered.map((severity, source_position) => {
+  sources.push({ source_type: "ci", records: ci });
+  const candidates = sources.flatMap(({ source_type, records }) => {
+    const ordered = [...records].sort((a, b) => a.evidence_sha256.localeCompare(b.evidence_sha256) || a.severity.localeCompare(b.severity));
+    const source_artifact_sha256 = sha256(canonical({ source_type, records: ordered.map(({ severity, evidence_sha256 }) => ({ severity, evidence_sha256 })) }));
+    return ordered.map(({ severity, evidence_sha256, source_locator }, source_position) => {
       const source_key = sha256(canonical({ source_type, source_artifact_sha256, source_local_position: source_position }));
-      return { source_type, source_position, severity, source_artifact_sha256, source_key };
+      return { source_type, source_position, severity, evidence_sha256, source_artifact_sha256, source_key, source_locator };
     });
   }).sort((a, b) => a.source_key.localeCompare(b.source_key));
   return { candidates, malformed };
@@ -208,6 +218,7 @@ export function buildFindingEnvelopePrompt(basePrompt, inventory) {
     source_key: c.source_key,
     source_type: c.source_type,
     source_position: c.source_position,
+    source_locator: c.source_locator,
     hinted_severity: c.severity,
   }));
   return `${basePrompt}\n\n## Machine observation response (required)\n\nReturn ONLY one JSON object with exactly ` +

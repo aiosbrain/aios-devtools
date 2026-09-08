@@ -114,6 +114,8 @@ test("inventory uses the canonical severity records for compact bullets, heading
   assert.deepEqual(extractFindingSeverityRecords(compact).map((x) => x.severity), ["Critical"]);
   const compactInventory = normalizeFindingInventory({ ...BASE_INPUTS, localBugbotMarkdown: compact, gptMarkdown: null, issueComments: [], checks: { checks: [] } }, opts);
   assert.deepEqual(compactInventory.candidates.map((x) => x.severity), ["critical"]);
+  const changedInventory = normalizeFindingInventory({ ...BASE_INPUTS, localBugbotMarkdown: "- Critical: scripts/x.mjs:12 — different defect", gptMarkdown: null, issueComments: [], checks: { checks: [] } }, opts);
+  assert.notEqual(changedInventory.candidates[0].source_key, compactInventory.candidates[0].source_key);
 
   const heading = "### [High] scripts/x.mjs:12 — not a canonical finding";
   assert.equal(hasCriticalOrHighFindings(heading), false);
@@ -131,7 +133,8 @@ test("source ordering and exact replay preserve identities and bytes", () => {
   const a = normalizeFindingInventory(sourceInputs, opts);
   const shuffled = { ...sourceInputs, issueComments: [...sourceInputs.issueComments].reverse(), inlineComments: [...sourceInputs.inlineComments].reverse() };
   const b = normalizeFindingInventory(shuffled, opts);
-  assert.deepEqual(b.candidates, a.candidates);
+  const stableProjection = (inventory) => inventory.candidates.map(({ source_locator: _locator, ...candidate }) => candidate);
+  assert.deepEqual(stableProjection(b), stableProjection(a));
   const bytesA = projectFindingObservations(a, parseFindingEnvelope(envelope(a), a, registry)).map(canonical).join("\n");
   const bytesB = projectFindingObservations(b, parseFindingEnvelope(envelope(b), b, registry)).map(canonical).join("\n");
   assert.equal(bytesB, bytesA);
@@ -278,6 +281,7 @@ test("structured prompt contains opaque keys but not source prose", () => {
   assert.match(prompt, /Machine observation response/);
   assert.equal(prompt.includes(inventory.candidates[0].source_key), true);
   assert.equal(prompt.includes(`"source_position":${inventory.candidates[0].source_position}`), true);
+  assert.equal(prompt.includes('"source_locator":'), true);
   assert.equal(prompt.includes("unsafe retry"), false);
 });
 
