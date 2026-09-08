@@ -1,0 +1,17 @@
+{
+  "schema_version": "finding-observations.registry.v1",
+  "producer": {
+    "name": "aios-devtools",
+    "versions": ["0.3.1"]
+  },
+  "codebase_mappings": {
+    "aiosbrain/aios-design": "aios-design",
+    "aiosbrain/aios-devtools": "aios-devtools",
+    "aiosbrain/aios-engineering-harness": "harness",
+    "aiosbrain/aios-team-brain": "team-brain",
+    "aiosbrain/aios-website": "website",
+    "aiosbrain/aios-workspace": "workspace",
+    "aiosbrain/aios-workspace-gui": "workspace-gui"
+  },
+  "linear_teams": ["AIO"]
+}

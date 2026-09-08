@@ -47,53 +47,30 @@ import {
   rankFindings,
   rankSeverity,
 } from "./severity.mjs";
+import { extractFindingSeverityRecords } from "./finding-severity-records.mjs";
+import { checkIsPending, checkIsRed } from "./ci-status.mjs";
 import { DIFF_CAP } from "./build.mjs";
 import { stripToolkitDirArgs } from "./toolkit-locate.mjs";
+import { createFindingObservationSession } from "./finding-observations.mjs";
+import { buildConsolidatePrompt } from "./consolidate-prompt.mjs";
+export { buildConsolidatePrompt } from "./consolidate-prompt.mjs";
 const ISSUE_RE = /^AIO-\d+$/;
 // Cap the GPT-5.5 review markdown fed to the model (documented, tunable via this const).
 // The PR diff shares build.mjs's DIFF_CAP so the two caps never silently drift.
 export const GPT_REVIEW_CAP = 20000;
 export const DEFAULT_CONSOLIDATE_TIMEOUT = 300; // seconds
-// CI states/conclusions that mean the board is red (block-worthy).
-const CI_RED = new Set([
-  "FAILURE",
-  "TIMED_OUT",
-  "CANCELLED",
-  "ACTION_REQUIRED",
-  "STARTUP_FAILURE",
-  "ERROR",
-]);
-
 // Non-terminal (pending/in-flight) check states. The consolidator runs AFTER wait-for-bots,
 // so a still-pending check means CI evidence is INCOMPLETE — the board hasn't settled and a
 // pending job could still fail. Fail closed: block on a pending board rather than let the
 // model mark a PR merge-ready before CI finishes (the reviewer's "pending fails open" gap).
-const CI_PENDING = new Set([
-  "PENDING",
-  "IN_PROGRESS",
-  "QUEUED",
-  "REQUESTED",
-  "WAITING",
-  "EXPECTED",
-]);
-
 // `gh pr checks --json` emits a `bucket` field that categorizes `state` into one of:
 // pass | fail | pending | skipping | cancel. It is the authoritative, gh-computed
-// classification — we key off it first, then fall back to the raw state sets above so
+// classification — the shared classifier keys off it first, then falls back to raw states so
 // older gh / odd states are still covered. (There is NO `conclusion` field on this
 // command — requesting it makes gh exit 1 with "Unknown JSON field", which is why the
 // check board used to always come back unavailable.)
-const CI_RED_BUCKET = new Set(["fail", "cancel"]);
-const CI_PENDING_BUCKET = new Set(["pending"]);
-
 // A red / pending check — bucket first, then the raw state sets. `skipping` (skipped) and
 // `neutral` are benign (neither red nor pending).
-function checkIsRed(x) {
-  return CI_RED_BUCKET.has(x.bucket) || CI_RED.has(x.state) || CI_RED.has(x.conclusion);
-}
-function checkIsPending(x) {
-  return CI_PENDING_BUCKET.has(x.bucket) || CI_PENDING.has(x.state) || CI_PENDING.has(x.conclusion);
-}
 
 const REVIEWER_PROMPT_REL = path.join(".claude", "agents", "code-reviewer.md");
 
@@ -116,6 +93,8 @@ export function parseConsolidateArgs(args) {
     gptReview: flag("--gpt-review"),
     out: flag("--out"),
     loopProfile: flag("--loop-profile"),
+    findingObservations: flag("--finding-observations"),
+    findingConfig: flag("--finding-config"),
   };
 }
 
@@ -211,13 +190,9 @@ export function extractLocalBugbotSeverities(markdown) {
 
 // GPT-5.5 review markdown lists findings as `- \`High\` \`file\`: …`.
 export function extractGptSeverities(gptMarkdown) {
-  let max = null;
-  const re = /^\s*-\s*`(Critical|High|Medium|Low)`/gim;
-  let m;
-  while ((m = re.exec(gptMarkdown ?? "")) !== null) {
-    max = maxSev(max, normalizeSeverity(m[1]));
-  }
-  return max;
+  return extractFindingSeverityRecords(gptMarkdown, { dialect: "gpt" })
+    .map(({ severity }) => severity)
+    .reduce((max, severity) => maxSev(max, severity), null);
 }
 
 // CodeRabbit prose → severity, mapped conservatively UPWARD: "potential issue"/"Major" →
@@ -244,74 +219,6 @@ export function preExtractSeverities({ checks, localBugbot, coderabbit, gpt } = 
     extractGptSeverities(gpt),
   ].reduce((acc, s) => maxSev(acc, s), null);
   return { sourceMax, ciRed: !!checks?.ciRed, ciPending: !!checks?.ciPending };
-}
-
-// Assemble the consolidation prompt. The reviewer-prompt body (code-reviewer.md, frontmatter
-// stripped) carries the Output format + severity vocabulary + BUGBOT_CLEAR rule; we append
-// the consolidation instruction and every gathered input (incl. the PR diff, so plan-
-// conformance findings are grounded).
-export function buildConsolidatePrompt(reviewerPrompt, inputs = {}) {
-  const {
-    pr,
-    issue,
-    checks,
-    prDiff,
-    issueComments,
-    inlineComments,
-    reviews,
-    localBugbotMarkdown,
-    gptMarkdown,
-  } = inputs;
-  const asJson = (v) => JSON.stringify(v ?? [], null, 2);
-  const checkLines = checks?.checks?.length
-    ? checks.checks
-        .map((x) => `[${x.bucket || x.state || x.conclusion || "?"}] ${x.name}`)
-        .join("\n")
-    : checks?.ciRed
-      ? "(CI is red — see the raw board)"
-      : "(no CI check data)";
-  return [
-    reviewerPrompt.trim(),
-    "",
-    "---",
-    "",
-    `You are CONSOLIDATING every independent review of PR #${pr ?? "?"} (${issue ?? "?"}) into ONE finding list.`,
-    "Instructions:",
-    "- Dedupe findings that describe the same issue across sources.",
-    "- Tag every merged finding with its origin: `(source: Local Bugbot|CodeRabbit|GPT-5.5)`.",
-    "- Tag any AIOS-rule / plan-conformance finding with `(plan-conformance)`.",
-    "- Rank findings by severity (Critical > High > Medium > Low).",
-    "- Emit EXACTLY the `## Output format` structure above, using the `[severity] file:line — …` bracket form.",
-    "- If (and only if) there are no Critical or High findings, end with `BUGBOT_CLEAR` alone on the last line.",
-    "",
-    "## CI checks",
-    "",
-    checkLines,
-    "",
-    "## PR diff (base..head)",
-    "",
-    prDiff || "(no diff)",
-    "",
-    "## Local Bugbot review",
-    "",
-    localBugbotMarkdown || "(missing — caller must fail before this prompt)",
-    "",
-    "## Current-head CodeRabbit issue comments",
-    "",
-    asJson(issueComments),
-    "",
-    "## Current-head CodeRabbit inline diff comments",
-    "",
-    asJson(inlineComments),
-    "",
-    "## Current-head CodeRabbit submitted reviews",
-    "",
-    asJson(reviews),
-    "",
-    "## GPT-5.5 review",
-    "",
-    gptMarkdown || "(none provided)",
-  ].join("\n");
 }
 
 // Read the current `## Verdict` value (CLEAR | BLOCKED), or null when absent.
@@ -480,7 +387,7 @@ export function filterCurrentHeadCodeRabbit(records, latestCommitAt) {
 }
 
 // Gather every input per code-reviewer.md §"How to gather inputs" — now INCLUDING the PR diff.
-export function gatherInputs({ runGh, slug, pr, localBugbotReviewPath, gptReviewPath } = {}) {
+export function gatherInputs({ runGh, slug, pr, localBugbotReviewPath, gptReviewPath, preserveFullGpt = false } = {}) {
   // 1. CI checks (tolerate a red/pending board — it's data, not a crash).
   const checksRes = runGh(
     ["pr", "checks", String(pr), "--repo", slug, "--json", "name,state,bucket"],
@@ -527,7 +434,7 @@ export function gatherInputs({ runGh, slug, pr, localBugbotReviewPath, gptReview
         "api",
         `repos/${slug}/issues/${pr}/comments`,
         "--jq",
-        `[.[] | ${CODERABBIT_SELECT} | {user: .user.login, body: .body, created_at: .created_at}]`,
+        `[.[] | ${CODERABBIT_SELECT} | {id: .id, user: .user.login, body: .body, created_at: .created_at}]`,
       ])
     ),
     latestCommit.committed_at
@@ -538,7 +445,7 @@ export function gatherInputs({ runGh, slug, pr, localBugbotReviewPath, gptReview
         "api",
         `repos/${slug}/pulls/${pr}/comments`,
         "--jq",
-        `[.[] | ${CODERABBIT_SELECT} | {user: .user.login, path: .path, line: .line, body: .body, created_at: .created_at}]`,
+        `[.[] | ${CODERABBIT_SELECT} | {id: .id, user: .user.login, path: .path, line: .line, body: .body, created_at: .created_at}]`,
       ])
     ),
     latestCommit.committed_at
@@ -549,7 +456,7 @@ export function gatherInputs({ runGh, slug, pr, localBugbotReviewPath, gptReview
         "api",
         `repos/${slug}/pulls/${pr}/reviews`,
         "--jq",
-        `[.[] | ${CODERABBIT_SELECT} | {user: .user.login, state: .state, body: .body, submitted_at: .submitted_at}]`,
+        `[.[] | ${CODERABBIT_SELECT} | {id: .id, user: .user.login, state: .state, body: .body, submitted_at: .submitted_at}]`,
       ])
     ),
     latestCommit.committed_at
@@ -565,17 +472,19 @@ export function gatherInputs({ runGh, slug, pr, localBugbotReviewPath, gptReview
   const localBugbotMarkdown = readFileSync(localBugbotReviewPath, "utf8");
 
   let gptMarkdown = null;
+  let gptObservationMarkdown = null;
   if (gptReviewPath) {
     if (!existsSync(gptReviewPath))
       throw new Error(`--gpt-review file not found: ${gptReviewPath}`);
     gptMarkdown = readFileSync(gptReviewPath, "utf8");
+    if (preserveFullGpt) gptObservationMarkdown = gptMarkdown;
     if (gptMarkdown.length > GPT_REVIEW_CAP) {
       gptMarkdown =
         gptMarkdown.slice(0, GPT_REVIEW_CAP) + `\n\n(diff truncated at ${GPT_REVIEW_CAP} chars)`;
     }
   }
 
-  return {
+  const gathered = {
     pr,
     checks,
     prDiff,
@@ -586,6 +495,11 @@ export function gatherInputs({ runGh, slug, pr, localBugbotReviewPath, gptReview
     localBugbotMarkdown,
     gptMarkdown,
   };
+  if (preserveFullGpt) {
+    gathered.gptObservationMarkdown = gptObservationMarkdown;
+    gathered.gptObservationVisibleChars = Math.min(gptObservationMarkdown?.length ?? 0, GPT_REVIEW_CAP);
+  }
+  return gathered;
 }
 
 // ── public entry ──────────────────────────────────────────────────────────────
@@ -608,6 +522,8 @@ function usage() {
       "  --gpt-review <path> include a GPT-5.5 review markdown file in the consolidation",
       "  --loop-profile light select the light loop model profile (forwarded by aios ship --loop light)",
       "  --out <path>        override the output path (default: .aios/loop/<issue>/findings-r<N>.md)",
+      "  --finding-observations <path> write canonical finding-observations JSONL",
+      "  --finding-config <path> override the packaged reviewed finding registry",
       "",
       "Prints VERDICT=CLEAR / VERDICT=BLOCKED. Exit codes: 0 CLEAR · 3 BLOCKED · 1 error.",
       "A red OR still-pending CI board returns 3 (BLOCKED), never 1 — pending fails closed.",
@@ -642,22 +558,50 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
     return 1;
   }
   const round = Number.isFinite(opts.round) && opts.round > 0 ? opts.round : 1;
-
-  const runGh = deps.runGh ?? defaultRunGh;
-  const readReviewerPrompt = deps.readReviewerPrompt ?? (() => defaultReadReviewerPrompt(repo));
-
   const slug = opts.repoSlug ?? detectRepo(repo);
   if (!slug) {
     console.error(c.red("error: could not detect the target repo — pass --repo owner/repo."));
     return 1;
   }
+  let findingSession = null;
+  if (opts.findingObservations) {
+    try {
+      findingSession = createFindingObservationSession({
+        outputPath: opts.findingObservations, configPath: opts.findingConfig,
+        issue: opts.issue, pr: opts.pr, round, now: deps.now, repoSlug: slug,
+      });
+    } catch (e) {
+      console.error(c.red(`error: finding observations config failed: ${e.message}`));
+      return 1;
+    }
+  }
+  const finish = (code) => { findingSession?.close(); return code; };
+  const reportOutPath = opts.out ? path.resolve(opts.out) : defaultOutPath(repo, opts.issue, round);
+  const plannedOutPath = path.resolve(reportOutPath);
+  const observationPath = findingSession ? path.resolve(opts.findingObservations) : null;
+  const reservedObservationPath = observationPath && (
+    plannedOutPath === observationPath || plannedOutPath === `${observationPath}.lock` ||
+    plannedOutPath.startsWith(`${observationPath}.lock.`) || plannedOutPath === `${observationPath}.lease` ||
+    plannedOutPath.startsWith(`${observationPath}.lease.`) || plannedOutPath.startsWith(`${observationPath}.tmp-`)
+  );
+  if (reservedObservationPath) {
+    console.error(c.red("error: --out must not use the finding-observations path or its reserved writer paths."));
+    return finish(1);
+  }
+  const reportObservationError = (error) => {
+    if (error) console.error(c.red(`error: finding observations failed: ${error.message}`));
+  };
+
+  const runGh = deps.runGh ?? defaultRunGh;
+  const readReviewerPrompt = deps.readReviewerPrompt ?? (() => defaultReadReviewerPrompt(repo));
 
   let reviewerPrompt;
   try {
     reviewerPrompt = readReviewerPrompt();
   } catch (e) {
     console.error(c.red(`error: ${e.message}`));
-    return 1;
+    reportObservationError(findingSession?.writeUnknown());
+    return finish(1);
   }
 
   // Gather. Only a NON-tolerated gh failure (auth/network on diff/comments) is an error.
@@ -669,10 +613,12 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
       pr: opts.pr,
       localBugbotReviewPath: opts.localBugbotReview,
       gptReviewPath: opts.gptReview,
+      preserveFullGpt: !!findingSession,
     });
   } catch (e) {
     console.error(c.red(`error: gathering inputs failed: ${e.message}`));
-    return 1;
+    reportObservationError(findingSession?.writeUnknown());
+    return finish(1);
   }
 
   // Fail closed if CI evidence could not be gathered. `gh pr checks` returning non-zero with
@@ -685,7 +631,26 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
           "(auth/network/invalid repo?). Refusing to consolidate without CI evidence."
       )
     );
-    return 1;
+    reportObservationError(findingSession?.writeUnknown());
+    return finish(1);
+  }
+
+  let findingInventory = null;
+  if (findingSession) {
+    try { findingInventory = findingSession.capture(inputs); }
+    catch (e) {
+      console.error(c.red(`error: finding inventory failed: ${e.message}`));
+      reportObservationError(findingSession.writeUnknown());
+      return finish(1);
+    }
+    // Persist a crash-safe discovery checkpoint before any downstream provider/config work.
+    // Successful consolidation atomically replaces it with the complete ledger; any hard exit
+    // after trustworthy capture still leaves discovered/incomplete evidence behind.
+    const checkpointError = findingSession.writePartial(findingInventory);
+    if (checkpointError) {
+      reportObservationError(checkpointError);
+      return finish(1);
+    }
   }
 
   // Deterministic pre-extraction (single severity dialect). Scan EVERY gathered textual
@@ -711,11 +676,15 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
     models = resolveLoopModels({ repo, profile: opts.loopProfile ?? null });
   } catch (e) {
     console.error(c.red(`error: ${e.message}`));
-    return 1;
+    reportObservationError(findingInventory && findingSession.writePartial(findingInventory));
+    return finish(1);
   }
   const cfg = models.consolidate;
   const timeoutMs = cfg.timeoutMs ?? DEFAULT_CONSOLIDATE_TIMEOUT * 1000;
-  const prompt = buildConsolidatePrompt(reviewerPrompt, { ...inputs, issue: opts.issue });
+  const legacyPrompt = buildConsolidatePrompt(reviewerPrompt, { ...inputs, issue: opts.issue });
+  const prompt = findingInventory
+    ? findingSession.prompt(legacyPrompt, findingInventory)
+    : legacyPrompt;
 
   let modelOutput;
   try {
@@ -744,13 +713,32 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
     })();
   } catch (e) {
     console.error(c.red(`error: consolidation model call failed: ${e.message}`));
-    return 1;
+    reportObservationError(findingInventory && findingSession.writePartial(findingInventory));
+    return finish(1);
+  }
+
+  let findingEnvelope = null;
+  if (findingInventory) {
+    try {
+      findingEnvelope = findingSession.parse(modelOutput, findingInventory);
+      modelOutput = findingEnvelope.report_markdown;
+    } catch (e) {
+      console.error(c.red(`error: finding observations envelope failed: ${e.message}`));
+      reportObservationError(findingSession.writePartial(findingInventory));
+      return finish(1);
+    }
   }
 
   // Deterministic post-validation (fail-closed) + final verdict (forced block is unloseable).
+  const decisionMax = findingEnvelope
+    ? [...findingEnvelope.decisions.values()]
+      .filter((decision) => decision.outcome === "verified")
+      .map((decision) => normalizeSeverity(decision.taxonomy.severity))
+      .reduce((highest, severity) => maxSev(highest, severity), null)
+    : null;
   const validated = postValidate({
     modelOutput,
-    sourceMax,
+    sourceMax: maxSev(sourceMax, decisionMax),
     ciRed,
     ciPending,
     checks: inputs.checks,
@@ -759,18 +747,27 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
   const finalText = finalizeOutput(validated.text, verdict);
 
   // Write the artifact (gitignored; never committed). --out overrides the default path.
-  const outPath = opts.out ? path.resolve(opts.out) : defaultOutPath(repo, opts.issue, round);
+  const outPath = reportOutPath;
   try {
     mkdirSync(path.dirname(outPath), { recursive: true });
     writeFileSync(outPath, finalText);
   } catch (e) {
     console.error(c.red(`error: could not write findings to ${outPath}: ${e.message}`));
-    return 1;
+    reportObservationError(findingInventory && findingSession.writePartial(findingInventory));
+    return finish(1);
+  }
+
+  if (findingInventory) {
+    const error = findingSession.writeComplete(findingInventory, findingEnvelope);
+    if (error) {
+      reportObservationError(error);
+      return finish(1);
+    }
   }
 
   console.log(c.dim(`findings → ${outPath}`));
   console.log(`VERDICT=${verdict}`);
-  return verdict === "BLOCKED" ? 3 : 0;
+  return finish(verdict === "BLOCKED" ? 3 : 0);
 }
 
 // Direct entrypoint so `node scripts/consolidate-findings.mjs --help` works; the normal
