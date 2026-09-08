@@ -434,7 +434,7 @@ export function gatherInputs({ runGh, slug, pr, localBugbotReviewPath, gptReview
         "api",
         `repos/${slug}/issues/${pr}/comments`,
         "--jq",
-        `[.[] | ${CODERABBIT_SELECT} | {user: .user.login, body: .body, created_at: .created_at}]`,
+        `[.[] | ${CODERABBIT_SELECT} | {id: .id, user: .user.login, body: .body, created_at: .created_at}]`,
       ])
     ),
     latestCommit.committed_at
@@ -445,7 +445,7 @@ export function gatherInputs({ runGh, slug, pr, localBugbotReviewPath, gptReview
         "api",
         `repos/${slug}/pulls/${pr}/comments`,
         "--jq",
-        `[.[] | ${CODERABBIT_SELECT} | {user: .user.login, path: .path, line: .line, body: .body, created_at: .created_at}]`,
+        `[.[] | ${CODERABBIT_SELECT} | {id: .id, user: .user.login, path: .path, line: .line, body: .body, created_at: .created_at}]`,
       ])
     ),
     latestCommit.committed_at
@@ -456,7 +456,7 @@ export function gatherInputs({ runGh, slug, pr, localBugbotReviewPath, gptReview
         "api",
         `repos/${slug}/pulls/${pr}/reviews`,
         "--jq",
-        `[.[] | ${CODERABBIT_SELECT} | {user: .user.login, state: .state, body: .body, submitted_at: .submitted_at}]`,
+        `[.[] | ${CODERABBIT_SELECT} | {id: .id, user: .user.login, state: .state, body: .body, submitted_at: .submitted_at}]`,
       ])
     ),
     latestCommit.committed_at
@@ -575,15 +575,17 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
       return 1;
     }
   }
+  const finish = (code) => { findingSession?.close(); return code; };
   const plannedOutPath = opts.out ? path.resolve(opts.out) : defaultOutPath(repo, opts.issue, round);
   const observationPath = findingSession ? path.resolve(opts.findingObservations) : null;
   const reservedObservationPath = observationPath && (
     plannedOutPath === observationPath || plannedOutPath === `${observationPath}.lock` ||
-    plannedOutPath.startsWith(`${observationPath}.lock.`) || plannedOutPath.startsWith(`${observationPath}.tmp-`)
+    plannedOutPath.startsWith(`${observationPath}.lock.`) || plannedOutPath === `${observationPath}.lease` ||
+    plannedOutPath.startsWith(`${observationPath}.lease.`) || plannedOutPath.startsWith(`${observationPath}.tmp-`)
   );
   if (reservedObservationPath) {
     console.error(c.red("error: --out must not use the finding-observations path or its reserved writer paths."));
-    return 1;
+    return finish(1);
   }
   const reportObservationError = (error) => {
     if (error) console.error(c.red(`error: finding observations failed: ${error.message}`));
@@ -598,7 +600,7 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
   } catch (e) {
     console.error(c.red(`error: ${e.message}`));
     reportObservationError(findingSession?.writeUnknown());
-    return 1;
+    return finish(1);
   }
 
   // Gather. Only a NON-tolerated gh failure (auth/network on diff/comments) is an error.
@@ -615,7 +617,7 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
   } catch (e) {
     console.error(c.red(`error: gathering inputs failed: ${e.message}`));
     reportObservationError(findingSession?.writeUnknown());
-    return 1;
+    return finish(1);
   }
 
   // Fail closed if CI evidence could not be gathered. `gh pr checks` returning non-zero with
@@ -629,7 +631,7 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
       )
     );
     reportObservationError(findingSession?.writeUnknown());
-    return 1;
+    return finish(1);
   }
 
   let findingInventory = null;
@@ -638,7 +640,7 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
     catch (e) {
       console.error(c.red(`error: finding inventory failed: ${e.message}`));
       reportObservationError(findingSession.writeUnknown());
-      return 1;
+      return finish(1);
     }
     // Persist a crash-safe discovery checkpoint before any downstream provider/config work.
     // Successful consolidation atomically replaces it with the complete ledger; any hard exit
@@ -646,7 +648,7 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
     const checkpointError = findingSession.writePartial(findingInventory);
     if (checkpointError) {
       reportObservationError(checkpointError);
-      return 1;
+      return finish(1);
     }
   }
 
@@ -674,7 +676,7 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
   } catch (e) {
     console.error(c.red(`error: ${e.message}`));
     reportObservationError(findingInventory && findingSession.writePartial(findingInventory));
-    return 1;
+    return finish(1);
   }
   const cfg = models.consolidate;
   const timeoutMs = cfg.timeoutMs ?? DEFAULT_CONSOLIDATE_TIMEOUT * 1000;
@@ -711,7 +713,7 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
   } catch (e) {
     console.error(c.red(`error: consolidation model call failed: ${e.message}`));
     reportObservationError(findingInventory && findingSession.writePartial(findingInventory));
-    return 1;
+    return finish(1);
   }
 
   let findingEnvelope = null;
@@ -722,7 +724,7 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
     } catch (e) {
       console.error(c.red(`error: finding observations envelope failed: ${e.message}`));
       reportObservationError(findingSession.writePartial(findingInventory));
-      return 1;
+      return finish(1);
     }
   }
 
@@ -751,20 +753,20 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
   } catch (e) {
     console.error(c.red(`error: could not write findings to ${outPath}: ${e.message}`));
     reportObservationError(findingInventory && findingSession.writePartial(findingInventory));
-    return 1;
+    return finish(1);
   }
 
   if (findingInventory) {
     const error = findingSession.writeComplete(findingInventory, findingEnvelope);
     if (error) {
       reportObservationError(error);
-      return 1;
+      return finish(1);
     }
   }
 
   console.log(c.dim(`findings → ${outPath}`));
   console.log(`VERDICT=${verdict}`);
-  return verdict === "BLOCKED" ? 3 : 0;
+  return finish(verdict === "BLOCKED" ? 3 : 0);
 }
 
 // Direct entrypoint so `node scripts/consolidate-findings.mjs --help` works; the normal

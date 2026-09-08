@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import { extractFindingSeverityRecords } from "./finding-severity-records.mjs";
 import { checkIsPending, checkIsRed } from "./ci-status.mjs";
-import { writeAtomicJsonl } from "./atomic-jsonl.mjs";
+import { acquireAtomicJsonlLease, releaseAtomicJsonlLease, writeAtomicJsonl } from "./atomic-jsonl.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONTRACTS = path.join(HERE, "..", "contracts");
 export const SCHEMA_PATH = path.join(CONTRACTS, "finding-observations.v1.schema.json");
@@ -111,6 +111,10 @@ function textFindingRecords(text, dialect = "canonical") {
 
 function codeRabbitItemIdentity(value) {
   const identity = {};
+  if (value.id !== undefined) {
+    if (!Number.isInteger(value.id) || value.id < 1) throw new Error("unsafe CodeRabbit id");
+    identity.id = value.id;
+  }
   if (value.path !== undefined) {
     if (typeof value.path !== "string" || value.path.length > 500 || value.path.startsWith("/") || /(^|\/)\.\.(\/|$)|[\u0000-\u001f]/.test(value.path)) throw new Error("unsafe CodeRabbit path");
     identity.path = value.path;
@@ -125,7 +129,7 @@ function codeRabbitItemIdentity(value) {
       identity[key] = value[key];
     }
   }
-  return sha256(canonical({ fields: Object.keys(identity).sort() }));
+  return sha256(canonical({ fields: Object.keys(identity).sort(), id: identity.id ?? null, line: identity.line ?? null }));
 }
 
 function codeRabbitRecords(body, item, itemIdentity) {
@@ -472,6 +476,7 @@ export function createFindingObservationSession({ outputPath, configPath, issue,
   const registry = loadFindingRegistry(configPath);
   resolvePartition(registry, issue, repoSlug);
   const observedAt = new Date(now ? now() : Date.now()).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const lease = acquireAtomicJsonlLease(outputPath);
   const safeWrite = (records) => {
     try { writeFindingObservations(outputPath, records, registry); return null; }
     catch (error) { return error; }
@@ -483,5 +488,6 @@ export function createFindingObservationSession({ outputPath, configPath, issue,
     writeUnknown: () => safeWrite(projectUnknownSummary({ issue, pr, round, observedAt, registry, repoSlug })),
     writePartial: (inventory) => safeWrite(projectFindingObservations(inventory, null, { partial: true })),
     writeComplete: (inventory, parsed) => safeWrite(projectFindingObservations(inventory, parsed)),
+    close: () => releaseAtomicJsonlLease(lease),
   };
 }

@@ -57,7 +57,7 @@ function replaceStaleLock(lockPath, nowMs) {
       throw new Error(`finding observation output is locked: ${lockPath}`);
     }
     unlinkSync(lockPath);
-    createLock(lockPath, nowMs);
+    return createLock(lockPath, nowMs);
   } finally {
     void guard;
     if (existsSync(recovery)) unlinkSync(recovery);
@@ -66,11 +66,25 @@ function replaceStaleLock(lockPath, nowMs) {
 
 function acquireLock(lockPath, nowMs) {
   try {
-    createLock(lockPath, nowMs);
+    return createLock(lockPath, nowMs);
   } catch (error) {
     if (error.code !== "EEXIST") throw error;
-    replaceStaleLock(lockPath, nowMs);
+    return replaceStaleLock(lockPath, nowMs);
   }
+}
+
+export function acquireAtomicJsonlLease(outputPath, { nowMs = Date.now() } = {}) {
+  const lockPath = `${path.resolve(outputPath)}.lease`;
+  mkdirSync(path.dirname(lockPath), { recursive: true });
+  return { lockPath, nonce: acquireLock(lockPath, nowMs) };
+}
+
+export function releaseAtomicJsonlLease(lease) {
+  if (!lease || !existsSync(lease.lockPath)) return;
+  try {
+    const lock = JSON.parse(readFileSync(lease.lockPath, "utf8"));
+    if (lock.nonce === lease.nonce) unlinkSync(lease.lockPath);
+  } catch { /* Never remove a lease no longer provably owned by this session. */ }
 }
 
 export function writeAtomicJsonl(outputPath, bytes, { nowMs = Date.now() } = {}) {

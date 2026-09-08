@@ -239,8 +239,8 @@ test("source ordering and exact replay preserve identities and bytes", () => {
     projectFindingObservations(a, null, { partial: true })[0].candidate_id);
 
   const identical = { ...BASE_INPUTS, issueComments: [], inlineComments: [
-    { path: "src/a.mjs", line: 10, body: "**Major:** Missing null check." },
-    { path: "src/b.mjs", line: 20, body: "**Major:** Missing null check." },
+    { id: 101, path: "src/a.mjs", line: 10, body: "**Major:** Missing null check." },
+    { id: 102, path: "src/b.mjs", line: 20, body: "**Major:** Missing null check." },
   ] };
   const forward = normalizeFindingInventory(identical, opts);
   const reversed = normalizeFindingInventory({ ...identical, inlineComments: [...identical.inlineComments].reverse() }, opts);
