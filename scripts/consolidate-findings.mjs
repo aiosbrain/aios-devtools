@@ -49,6 +49,9 @@ import {
 } from "./severity.mjs";
 import { DIFF_CAP } from "./build.mjs";
 import { stripToolkitDirArgs } from "./toolkit-locate.mjs";
+import { createFindingObservationSession } from "./finding-observations.mjs";
+import { buildConsolidatePrompt } from "./consolidate-prompt.mjs";
+export { buildConsolidatePrompt } from "./consolidate-prompt.mjs";
 const ISSUE_RE = /^AIO-\d+$/;
 // Cap the GPT-5.5 review markdown fed to the model (documented, tunable via this const).
 // The PR diff shares build.mjs's DIFF_CAP so the two caps never silently drift.
@@ -116,6 +119,8 @@ export function parseConsolidateArgs(args) {
     gptReview: flag("--gpt-review"),
     out: flag("--out"),
     loopProfile: flag("--loop-profile"),
+    findingObservations: flag("--finding-observations"),
+    findingConfig: flag("--finding-config"),
   };
 }
 
@@ -244,74 +249,6 @@ export function preExtractSeverities({ checks, localBugbot, coderabbit, gpt } = 
     extractGptSeverities(gpt),
   ].reduce((acc, s) => maxSev(acc, s), null);
   return { sourceMax, ciRed: !!checks?.ciRed, ciPending: !!checks?.ciPending };
-}
-
-// Assemble the consolidation prompt. The reviewer-prompt body (code-reviewer.md, frontmatter
-// stripped) carries the Output format + severity vocabulary + BUGBOT_CLEAR rule; we append
-// the consolidation instruction and every gathered input (incl. the PR diff, so plan-
-// conformance findings are grounded).
-export function buildConsolidatePrompt(reviewerPrompt, inputs = {}) {
-  const {
-    pr,
-    issue,
-    checks,
-    prDiff,
-    issueComments,
-    inlineComments,
-    reviews,
-    localBugbotMarkdown,
-    gptMarkdown,
-  } = inputs;
-  const asJson = (v) => JSON.stringify(v ?? [], null, 2);
-  const checkLines = checks?.checks?.length
-    ? checks.checks
-        .map((x) => `[${x.bucket || x.state || x.conclusion || "?"}] ${x.name}`)
-        .join("\n")
-    : checks?.ciRed
-      ? "(CI is red — see the raw board)"
-      : "(no CI check data)";
-  return [
-    reviewerPrompt.trim(),
-    "",
-    "---",
-    "",
-    `You are CONSOLIDATING every independent review of PR #${pr ?? "?"} (${issue ?? "?"}) into ONE finding list.`,
-    "Instructions:",
-    "- Dedupe findings that describe the same issue across sources.",
-    "- Tag every merged finding with its origin: `(source: Local Bugbot|CodeRabbit|GPT-5.5)`.",
-    "- Tag any AIOS-rule / plan-conformance finding with `(plan-conformance)`.",
-    "- Rank findings by severity (Critical > High > Medium > Low).",
-    "- Emit EXACTLY the `## Output format` structure above, using the `[severity] file:line — …` bracket form.",
-    "- If (and only if) there are no Critical or High findings, end with `BUGBOT_CLEAR` alone on the last line.",
-    "",
-    "## CI checks",
-    "",
-    checkLines,
-    "",
-    "## PR diff (base..head)",
-    "",
-    prDiff || "(no diff)",
-    "",
-    "## Local Bugbot review",
-    "",
-    localBugbotMarkdown || "(missing — caller must fail before this prompt)",
-    "",
-    "## Current-head CodeRabbit issue comments",
-    "",
-    asJson(issueComments),
-    "",
-    "## Current-head CodeRabbit inline diff comments",
-    "",
-    asJson(inlineComments),
-    "",
-    "## Current-head CodeRabbit submitted reviews",
-    "",
-    asJson(reviews),
-    "",
-    "## GPT-5.5 review",
-    "",
-    gptMarkdown || "(none provided)",
-  ].join("\n");
 }
 
 // Read the current `## Verdict` value (CLEAR | BLOCKED), or null when absent.
@@ -608,6 +545,8 @@ function usage() {
       "  --gpt-review <path> include a GPT-5.5 review markdown file in the consolidation",
       "  --loop-profile light select the light loop model profile (forwarded by aios ship --loop light)",
       "  --out <path>        override the output path (default: .aios/loop/<issue>/findings-r<N>.md)",
+      "  --finding-observations <path> write canonical finding-observations JSONL",
+      "  --finding-config <path> override the packaged reviewed finding registry",
       "",
       "Prints VERDICT=CLEAR / VERDICT=BLOCKED. Exit codes: 0 CLEAR · 3 BLOCKED · 1 error.",
       "A red OR still-pending CI board returns 3 (BLOCKED), never 1 — pending fails closed.",
@@ -642,6 +581,21 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
     return 1;
   }
   const round = Number.isFinite(opts.round) && opts.round > 0 ? opts.round : 1;
+  let findingSession = null;
+  if (opts.findingObservations) {
+    try {
+      findingSession = createFindingObservationSession({
+        outputPath: opts.findingObservations, configPath: opts.findingConfig,
+        issue: opts.issue, pr: opts.pr, round, now: deps.now,
+      });
+    } catch (e) {
+      console.error(c.red(`error: finding observations config failed: ${e.message}`));
+      return 1;
+    }
+  }
+  const reportObservationError = (error) => {
+    if (error) console.error(c.red(`error: finding observations failed: ${error.message}`));
+  };
 
   const runGh = deps.runGh ?? defaultRunGh;
   const readReviewerPrompt = deps.readReviewerPrompt ?? (() => defaultReadReviewerPrompt(repo));
@@ -672,6 +626,7 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
     });
   } catch (e) {
     console.error(c.red(`error: gathering inputs failed: ${e.message}`));
+    reportObservationError(findingSession?.writeUnknown());
     return 1;
   }
 
@@ -685,7 +640,18 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
           "(auth/network/invalid repo?). Refusing to consolidate without CI evidence."
       )
     );
+    reportObservationError(findingSession?.writeUnknown());
     return 1;
+  }
+
+  let findingInventory = null;
+  if (findingSession) {
+    try { findingInventory = findingSession.capture(inputs, slug); }
+    catch (e) {
+      console.error(c.red(`error: finding inventory failed: ${e.message}`));
+      reportObservationError(findingSession.writeUnknown());
+      return 1;
+    }
   }
 
   // Deterministic pre-extraction (single severity dialect). Scan EVERY gathered textual
@@ -715,7 +681,10 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
   }
   const cfg = models.consolidate;
   const timeoutMs = cfg.timeoutMs ?? DEFAULT_CONSOLIDATE_TIMEOUT * 1000;
-  const prompt = buildConsolidatePrompt(reviewerPrompt, { ...inputs, issue: opts.issue });
+  const legacyPrompt = buildConsolidatePrompt(reviewerPrompt, { ...inputs, issue: opts.issue });
+  const prompt = findingInventory
+    ? findingSession.prompt(legacyPrompt, findingInventory)
+    : legacyPrompt;
 
   let modelOutput;
   try {
@@ -744,7 +713,20 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
     })();
   } catch (e) {
     console.error(c.red(`error: consolidation model call failed: ${e.message}`));
+    reportObservationError(findingInventory && findingSession.writePartial(findingInventory));
     return 1;
+  }
+
+  let findingEnvelope = null;
+  if (findingInventory) {
+    try {
+      findingEnvelope = findingSession.parse(modelOutput, findingInventory);
+      modelOutput = findingEnvelope.report_markdown;
+    } catch (e) {
+      console.error(c.red(`error: finding observations envelope failed: ${e.message}`));
+      reportObservationError(findingSession.writePartial(findingInventory));
+      return 1;
+    }
   }
 
   // Deterministic post-validation (fail-closed) + final verdict (forced block is unloseable).
@@ -765,7 +747,16 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
     writeFileSync(outPath, finalText);
   } catch (e) {
     console.error(c.red(`error: could not write findings to ${outPath}: ${e.message}`));
+    reportObservationError(findingInventory && findingSession.writePartial(findingInventory));
     return 1;
+  }
+
+  if (findingInventory) {
+    const error = findingSession.writeComplete(findingInventory, findingEnvelope);
+    if (error) {
+      reportObservationError(error);
+      return 1;
+    }
   }
 
   console.log(c.dim(`findings → ${outPath}`));

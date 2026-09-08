@@ -32,6 +32,7 @@
   },
   "files": [
     "CHANGELOG.md",
+    "contracts/",
     "scripts/",
     "docs/",
     "validation/agent-readiness-lib.mjs"
@@ -46,7 +47,8 @@
   },
   "dependencies": {
     "@aiosbrain/foundation": "^0.1.2",
-    "@anthropic-ai/sdk": "^0.115.0"
+    "@anthropic-ai/sdk": "^0.115.0",
+    "ajv": "8.20.0"
   },
   "devDependencies": {
     "c8": "^12.0.0"

@@ -1,0 +1,297 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import {
+  SCHEMA_PATH,
+  SCHEMA_SHA256,
+  PIN_PATH,
+  buildFindingEnvelopePrompt,
+  canonical,
+  findingEventId,
+  loadFindingRegistry,
+  normalizeFindingInventory,
+  parseFindingEnvelope,
+  projectFindingObservations,
+  projectUnknownSummary,
+  sha256,
+  validateFindingObservations,
+  writeFindingObservations,
+} from "../scripts/finding-observations.mjs";
+import { cmdConsolidateFindings } from "../scripts/consolidate-findings.mjs";
+import { parseCheckResults } from "../scripts/consolidate-findings.mjs";
+
+const registry = loadFindingRegistry();
+const BASE_INPUTS = {
+  localBugbotMarkdown: "- High: unsafe retry\n",
+  gptMarkdown: "- `Low` `README.md`: typo\n",
+  issueComments: [{ body: "_⚠️ Potential issue_ **Major:** null crash" }],
+  inlineComments: [], reviews: [],
+  checks: { checks: [{ name: "build", state: "FAILURE", bucket: "fail" }] },
+  latestCommit: { sha: "a".repeat(40), committed_at: "2026-09-08T00:00:00Z" },
+};
+const opts = { repoSlug: "aiosbrain/aios-devtools", issue: "AIO-1100", pr: 44, round: 1, registry };
+const decision = (source, override = {}) => ({
+  source_key: source.source_key,
+  outcome: "verified",
+  duplicate_target: null,
+  codebases: ["aios-devtools"],
+  taxonomy: { severity: source.severity, defect_class: "unknown", determinism: "unverified", fences: ["none"] },
+  evidence_status: "complete",
+  ...override,
+});
+const envelope = (inventory, transform = (d) => d) => JSON.stringify({
+  report_markdown: "## Verdict\n\nBLOCKED\n",
+  decisions: inventory.candidates.map((source) => transform(decision(source), source)),
+});
+
+test("vendored AIO-1098 schema has the exact published hash", () => {
+  assert.equal(sha256(readFileSync(SCHEMA_PATH)), SCHEMA_SHA256);
+  assert.equal(readFileSync(PIN_PATH, "utf8").trim().split(/\s+/)[0], SCHEMA_SHA256);
+});
+
+test("normalizes every supported dialect and projects a reconciled ledger", () => {
+  const inventory = normalizeFindingInventory(BASE_INPUTS, opts);
+  assert.equal(inventory.raw_candidates, 4);
+  assert.deepEqual([...new Set(inventory.candidates.map((x) => x.source_type))].sort(), ["ci", "coderabbit-issue", "gpt", "local-bugbot"]);
+  const parsed = parseFindingEnvelope(envelope(inventory), inventory, registry);
+  const records = projectFindingObservations(inventory, parsed);
+  assert.equal(validateFindingObservations(records, registry), true);
+  assert.equal(records.filter((x) => x.record_type === "candidate").length, 8);
+  assert.deepEqual(records.at(-1).counts, { raw_candidates: 4, emitted_candidates: 4, terminal_stage: 4, incomplete: 0, malformed: 0 });
+  assert.equal(records.every((x) => !canonical(x).includes("unsafe retry")), true);
+  assert.equal(records.every((x) => x.visibility_tier === "team"), true);
+});
+
+test("splits bundled CodeRabbit findings and accepts legacy Bugbot severity headings", () => {
+  const inputs = {
+    ...BASE_INPUTS,
+    localBugbotMarkdown: "**High Severity**\n\nRetry never stops.\n",
+    gptMarkdown: null,
+    issueComments: [{ body: "**Major:** crash\n\n**Minor:** confusing fallback" }],
+    checks: { checks: [] },
+  };
+  const inventory = normalizeFindingInventory(inputs, opts);
+  assert.equal(inventory.raw_candidates, 3);
+  assert.deepEqual(inventory.candidates.map((x) => x.severity).sort(), ["high", "high", "medium"]);
+});
+
+test("does not double-count overlapping CodeRabbit severity syntax", () => {
+  const inputs = { ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null, issueComments: [{ body: "**High:** SQL injection" }], checks: { checks: [] } };
+  assert.equal(normalizeFindingInventory(inputs, opts).raw_candidates, 1);
+});
+
+test("plaintext red CI cannot claim a trustworthy zero denominator", () => {
+  const checks = parseCheckResults("build  fail  1m  https://example.invalid");
+  assert.equal(checks.ciRed, true); assert.equal(checks.checks.length, 0);
+  assert.throws(() => normalizeFindingInventory({ ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null, issueComments: [], checks }, opts), /trustworthy candidate denominator/);
+});
+
+test("captures bracketed, table, and emphasized canonical Bugbot records", () => {
+  const inputs = {
+    ...BASE_INPUTS,
+    localBugbotMarkdown: "[High] scripts/x.mjs:1 — boom\n| Medium | x |\n- **Low**: note\n",
+    gptMarkdown: null, issueComments: [], checks: { checks: [] },
+  };
+  const inventory = normalizeFindingInventory(inputs, opts);
+  assert.deepEqual(inventory.candidates.map((x) => x.severity).sort(), ["high", "low", "medium"]);
+  assert.deepEqual(inventory.candidates.map((x) => x.source_position).sort(), [0, 1, 2]);
+});
+
+test("source ordering and exact replay preserve identities and bytes", () => {
+  const sourceInputs = { ...BASE_INPUTS, issueComments: [{ body: "**Major:** crash" }, { body: "**Minor:** docs" }] };
+  const a = normalizeFindingInventory(sourceInputs, opts);
+  const shuffled = { ...sourceInputs, issueComments: [...sourceInputs.issueComments].reverse(), inlineComments: [...sourceInputs.inlineComments].reverse() };
+  const b = normalizeFindingInventory(shuffled, opts);
+  assert.deepEqual(b.candidates, a.candidates);
+  const bytesA = projectFindingObservations(a, parseFindingEnvelope(envelope(a), a, registry)).map(canonical).join("\n");
+  const bytesB = projectFindingObservations(b, parseFindingEnvelope(envelope(b), b, registry)).map(canonical).join("\n");
+  assert.equal(bytesB, bytesA);
+});
+
+test("duplicate, rejected, incomplete, and cross-repo decisions remain one candidate each", () => {
+  const custom = { ...registry, codebase_mappings: { ...registry.codebase_mappings, "test/other": "workspace" } };
+  const inventory = normalizeFindingInventory(BASE_INPUTS, { ...opts, registry: custom });
+  const keys = inventory.candidates.map((x) => x.source_key);
+  const output = envelope(inventory, (d, source) => {
+    const i = keys.indexOf(source.source_key);
+    if (i === 1) return { ...d, outcome: "duplicate", duplicate_target: keys[0] };
+    if (i === 2) return { ...d, outcome: "rejected" };
+    if (i === 3) return { ...d, outcome: "incomplete", evidence_status: "incomplete", codebases: ["aios-devtools", "workspace"] };
+    return d;
+  });
+  const records = projectFindingObservations(inventory, parseFindingEnvelope(output, inventory, custom));
+  assert.equal(validateFindingObservations(records, custom), true);
+  assert.deepEqual(records.at(-1).counts, { raw_candidates: 4, emitted_candidates: 4, terminal_stage: 3, incomplete: 1, malformed: 0 });
+  assert.equal(new Set(records.filter((x) => x.record_type === "candidate").map((x) => x.candidate_id)).size, 4);
+});
+
+test("clear completion is proven zero while unavailable capture is unknown", () => {
+  const clean = normalizeFindingInventory({ ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null, issueComments: [], checks: { checks: [] } }, opts);
+  const cleanRecords = projectFindingObservations(clean, parseFindingEnvelope(envelope(clean), clean, registry));
+  assert.equal(cleanRecords.length, 1);
+  assert.deepEqual(cleanRecords[0].counts, { raw_candidates: 0, emitted_candidates: 0, terminal_stage: 0, incomplete: 0, malformed: 0 });
+  assert.equal(cleanRecords[0].detector_completed, true);
+  const unknown = projectUnknownSummary({ issue: "AIO-1100", pr: 44, observedAt: "2026-09-08T00:00:00Z", registry });
+  assert.equal(validateFindingObservations(unknown, registry), true);
+  assert.equal(unknown[0].capture_status, "unknown");
+  assert.equal(unknown[0].counts.raw_candidates, null);
+});
+
+test("provider failure after capture produces discovered/incomplete partial evidence", () => {
+  const inventory = normalizeFindingInventory(BASE_INPUTS, opts);
+  const records = projectFindingObservations(inventory, null, { partial: true });
+  assert.equal(validateFindingObservations(records, registry), true);
+  assert.equal(records.at(-1).capture_status, "partial");
+  assert.equal(records.at(-1).counts.incomplete, 4);
+  assert.equal(records.filter((x) => x.state === "incomplete").length, 4);
+});
+
+test("malformed source entries are counted without entering event value channels", () => {
+  const inputs = { ...BASE_INPUTS, issueComments: [...BASE_INPUTS.issueComments, { body: { private_path: "/secret/home" } }] };
+  const inventory = normalizeFindingInventory(inputs, opts);
+  assert.equal(inventory.raw_candidates, 5);
+  assert.equal(inventory.candidates.length, 4);
+  const records = projectFindingObservations(inventory, parseFindingEnvelope(envelope(inventory), inventory, registry));
+  assert.equal(validateFindingObservations(records, registry), true);
+  assert.deepEqual(records.at(-1).counts, { raw_candidates: 5, emitted_candidates: 4, terminal_stage: 4, incomplete: 1, malformed: 1 });
+  assert.equal(records.at(-1).emission_gap_reason, "malformed");
+  assert.equal(canonical(records).includes("secret/home"), false);
+});
+
+test("semantic validator rejects a schema-valid illegal lifecycle transition", () => {
+  const inventory = normalizeFindingInventory(BASE_INPUTS, opts);
+  const records = projectFindingObservations(inventory, parseFindingEnvelope(envelope(inventory), inventory, registry));
+  const bad = structuredClone(records);
+  const terminal = bad.find((x) => x.record_type === "candidate" && x.sequence === 1);
+  terminal.state = "merged"; terminal.disposition = "open";
+  const { event_id: _old, ...withoutId } = terminal; terminal.event_id = findingEventId(withoutId);
+  assert.throws(() => validateFindingObservations(bad, registry), /illegal finding transition/);
+});
+
+test("closed envelope rejects missing, invented, repeated, cyclic, unsafe, and unregistered decisions", () => {
+  const inventory = normalizeFindingInventory(BASE_INPUTS, opts);
+  const valid = JSON.parse(envelope(inventory));
+  for (const mutate of [
+    (x) => x.decisions.pop(),
+    (x) => { x.decisions[0].source_key = "f".repeat(64); },
+    (x) => x.decisions.push(x.decisions[0]),
+    (x) => { x.decisions[0].excerpt = "secret"; },
+    (x) => { x.decisions[0].codebases = ["unregistered"]; },
+  ]) {
+    const bad = structuredClone(valid); mutate(bad);
+    assert.throws(() => parseFindingEnvelope(JSON.stringify(bad), inventory, registry));
+  }
+  const cyclic = structuredClone(valid);
+  cyclic.decisions[0] = { ...cyclic.decisions[0], outcome: "duplicate", duplicate_target: cyclic.decisions[1].source_key };
+  cyclic.decisions[1] = { ...cyclic.decisions[1], outcome: "duplicate", duplicate_target: cyclic.decisions[0].source_key };
+  assert.throws(() => parseFindingEnvelope(JSON.stringify(cyclic), inventory, registry), /cycle/);
+  assert.throws(() => parseFindingEnvelope("```json\n{}\n```", inventory, registry), /strict JSON/);
+});
+
+test("ambiguous taxonomy is represented explicitly as unknown", () => {
+  const inventory = normalizeFindingInventory(BASE_INPUTS, opts);
+  const parsed = parseFindingEnvelope(envelope(inventory, (d) => ({ ...d, taxonomy: { severity: "unknown", defect_class: "unknown", determinism: "unknown", fences: ["unknown"] } })), inventory, registry);
+  assert.equal([...parsed.decisions.values()].every((x) => x.taxonomy.severity === "unknown"), true);
+});
+
+test("writer is atomic, mode 0600, and refuses live or young locks", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "finding-writer-"));
+  const out = path.join(dir, "events.jsonl");
+  const inventory = normalizeFindingInventory(BASE_INPUTS, opts);
+  const records = projectFindingObservations(inventory, parseFindingEnvelope(envelope(inventory), inventory, registry));
+  writeFindingObservations(out, records, registry);
+  assert.equal(statSync(out).mode & 0o777, 0o600);
+  assert.equal(readFileSync(out, "utf8").endsWith("\n"), true);
+  writeFileSync(`${out}.lock`, JSON.stringify({ pid: process.pid, created_at_ms: 0 }));
+  assert.throws(() => writeFindingObservations(out, records, registry), /locked/);
+  const old = Date.now() - 16 * 60 * 1000;
+  writeFileSync(`${out}.lock`, JSON.stringify({ pid: 2147483647, created_at_ms: old }));
+  assert.throws(() => writeFindingObservations(out, records, registry), /locked/);
+  utimesSync(`${out}.lock`, new Date(old), new Date(old));
+  chmodSync(`${out}.lock`, 0o600);
+  writeFindingObservations(out, records, registry);
+});
+
+test("structured prompt contains opaque keys but not source prose", () => {
+  const inventory = normalizeFindingInventory(BASE_INPUTS, opts);
+  const prompt = buildFindingEnvelopePrompt("legacy prompt contains raw evidence", inventory);
+  assert.match(prompt, /Machine observation response/);
+  assert.equal(prompt.includes(inventory.candidates[0].source_key), true);
+  assert.equal(prompt.includes(`"source_position":${inventory.candidates[0].source_position}`), true);
+  assert.equal(prompt.includes("unsafe retry"), false);
+});
+
+test("opt-in model failure retains exit 1 and writes partial observations", async () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "finding-command-"));
+  mkdirSync(path.join(repo, ".aios"), { recursive: true });
+  const review = path.join(repo, "bugbot.md"); writeFileSync(review, "- High: unsafe retry\n");
+  const out = path.join(repo, "observations.jsonl");
+  const runGh = (argv) => {
+    if (argv[0] === "pr" && argv[1] === "checks") return { code: 0, stdout: "[]", stderr: "" };
+    if (argv[0] === "api" && argv[1].endsWith("/commits")) return JSON.stringify(BASE_INPUTS.latestCommit);
+    if (argv[0] === "pr" && argv[1] === "diff") return "diff";
+    return "[]";
+  };
+  const code = await cmdConsolidateFindings(repo, ["--pr", "44", "--issue", "AIO-1100", "--repo", "aiosbrain/aios-devtools", "--local-bugbot-review", review, "--finding-observations", out], {
+    runGh, readReviewerPrompt: () => "review", callAgent: async () => { throw new Error("provider down"); }, now: () => "2026-09-08T00:00:00Z",
+  });
+  assert.equal(code, 1);
+  const records = readFileSync(out, "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(records.at(-1).capture_status, "partial");
+  assert.equal(records.some((x) => x.state === "incomplete"), true);
+});
+
+test("opt-in success makes one model call and writes the model report plus validated JSONL", async () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "finding-success-"));
+  const review = path.join(repo, "bugbot.md"); writeFileSync(review, "- Low: wording\n");
+  const out = path.join(repo, "observations.jsonl"); const markdown = path.join(repo, "findings.md");
+  const runGh = (argv) => {
+    if (argv[0] === "pr" && argv[1] === "checks") return { code: 0, stdout: "[]", stderr: "" };
+    if (argv[0] === "api" && argv[1].endsWith("/commits")) return JSON.stringify(BASE_INPUTS.latestCommit);
+    if (argv[0] === "pr" && argv[1] === "diff") return "diff";
+    return "[]";
+  };
+  let calls = 0;
+  const code = await cmdConsolidateFindings(repo, ["--pr", "44", "--issue", "AIO-1100", "--repo", "aiosbrain/aios-devtools", "--local-bugbot-review", review, "--out", markdown, "--finding-observations", out], {
+    runGh, readReviewerPrompt: () => "review", now: () => "2026-09-08T00:00:00Z",
+    callAgent: async (prompt) => {
+      calls++;
+      const opaque = JSON.parse(prompt.match(/Opaque inventory: (\[[^\n]+\])/)[1]);
+      return JSON.stringify({ report_markdown: "## Verdict\n\nCLEAR\n\nBUGBOT_CLEAR\n", decisions: opaque.map((x) => ({ source_key: x.source_key, outcome: "verified", duplicate_target: null, codebases: ["aios-devtools"], taxonomy: { severity: "low", defect_class: "docs", determinism: "deterministic", fences: ["none"] }, evidence_status: "complete" })) });
+    },
+  });
+  assert.equal(code, 0); assert.equal(calls, 1);
+  assert.equal(readFileSync(markdown, "utf8"), "## Verdict\n\nCLEAR\n\nBUGBOT_CLEAR\n");
+  const records = readFileSync(out, "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(validateFindingObservations(records, registry), true);
+  assert.equal(records.at(-1).counts.terminal_stage, 1);
+});
+
+test("pre-inventory gather failure writes an unknown summary and keeps exit 1", async () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "finding-unknown-"));
+  const review = path.join(repo, "bugbot.md"); writeFileSync(review, "BUGBOT_CLEAR\n");
+  const out = path.join(repo, "observations.jsonl");
+  const code = await cmdConsolidateFindings(repo, ["--pr", "44", "--issue", "AIO-1100", "--repo", "aiosbrain/aios-devtools", "--local-bugbot-review", review, "--finding-observations", out], {
+    runGh: () => { throw new Error("github unavailable"); }, readReviewerPrompt: () => "review", now: () => "2026-09-08T00:00:00Z",
+  });
+  assert.equal(code, 1);
+  const summary = JSON.parse(readFileSync(out, "utf8"));
+  assert.equal(summary.capture_status, "unknown"); assert.equal(summary.counts.raw_candidates, null);
+});
+
+test("legacy path never evaluates observation-only clock dependency", async () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "finding-legacy-clock-"));
+  const review = path.join(repo, "bugbot.md"); writeFileSync(review, "BUGBOT_CLEAR\n");
+  const runGh = (argv) => {
+    if (argv[0] === "pr" && argv[1] === "checks") return { code: 0, stdout: "[]", stderr: "" };
+    if (argv[0] === "api" && argv[1].endsWith("/commits")) return JSON.stringify(BASE_INPUTS.latestCommit);
+    if (argv[0] === "pr" && argv[1] === "diff") return "diff";
+    return "[]";
+  };
+  const code = await cmdConsolidateFindings(repo, ["--pr", "44", "--issue", "AIO-1100", "--repo", "aiosbrain/aios-devtools", "--local-bugbot-review", review], {
+    runGh, readReviewerPrompt: () => "review", callAgent: async () => "## Verdict\n\nCLEAR\n\nBUGBOT_CLEAR\n", now: () => { throw new Error("must stay unused"); },
+  });
+  assert.equal(code, 0);
+});
