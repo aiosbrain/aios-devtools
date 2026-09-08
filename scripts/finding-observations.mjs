@@ -1,23 +1,13 @@
 // Opt-in finding-observation producer for consolidate-findings (AIO-1100).
 // This leaf owns sanitization, identity, validation, and the fail-closed local writer.
-import {
-  closeSync,
-  existsSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import { extractFindingSeverityRecords } from "./finding-severity-records.mjs";
 import { checkIsPending, checkIsRed } from "./ci-status.mjs";
+import { writeAtomicJsonl } from "./atomic-jsonl.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONTRACTS = path.join(HERE, "..", "contracts");
 export const SCHEMA_PATH = path.join(CONTRACTS, "finding-observations.v1.schema.json");
@@ -28,7 +18,6 @@ export const PRODUCER_NAME = "aios-devtools";
 export const PRODUCER_VERSION = JSON.parse(readFileSync(path.join(HERE, "..", "package.json"), "utf8")).version;
 const DOMAIN_CANDIDATE = "aios.finding.candidate.discovery.v1\0";
 const DOMAIN_EVENT = "aios.finding.event.v1\0";
-const LOCK_STALE_MS = 15 * 60 * 1000;
 const TAXONOMY = {
   severity: new Set(["critical", "high", "medium", "low", "unknown"]),
   defect_class: new Set([
@@ -165,7 +154,8 @@ function makeInventoryRecords(inputs) {
     throw new Error("plaintext CI evidence has no trustworthy candidate denominator");
   }
   sources.push({ source_type: "local-bugbot", records: textFindingRecords(inputs.localBugbotMarkdown) });
-  sources.push({ source_type: "gpt", records: textFindingRecords(inputs.gptObservationMarkdown ?? inputs.gptMarkdown, "gpt") });
+  const gptEvidenceAvailable = inputs.gptObservationMarkdown === undefined || inputs.gptObservationMarkdown === inputs.gptMarkdown;
+  sources.push({ source_type: "gpt", records: textFindingRecords(inputs.gptObservationMarkdown ?? inputs.gptMarkdown, "gpt").map((record) => ({ ...record, evidence_available: gptEvidenceAvailable })) });
   for (const [source_type, items] of [
     ["coderabbit-issue", inputs.issueComments], ["coderabbit-inline", inputs.inlineComments],
     ["coderabbit-review", inputs.reviews],
@@ -189,9 +179,9 @@ function makeInventoryRecords(inputs) {
   const candidates = sources.flatMap(({ source_type, records }) => {
     const ordered = [...records].sort((a, b) => a.evidence_sha256.localeCompare(b.evidence_sha256) || a.severity.localeCompare(b.severity));
     const source_artifact_sha256 = sha256(canonical({ source_type, records: ordered.map(({ severity, evidence_sha256 }) => ({ severity, evidence_sha256 })) }));
-    return ordered.map(({ severity, evidence_sha256, source_locator }, source_position) => {
+    return ordered.map(({ severity, evidence_sha256, source_locator, evidence_available = true }, source_position) => {
       const source_key = sha256(canonical({ source_type, source_artifact_sha256, source_local_position: source_position }));
-      return { source_type, source_position, severity, evidence_sha256, source_artifact_sha256, source_key, source_locator };
+      return { source_type, source_position, severity, evidence_sha256, source_artifact_sha256, source_key, source_locator, evidence_available };
     });
   }).sort((a, b) => a.source_key.localeCompare(b.source_key));
   return { candidates, malformed };
@@ -245,6 +235,7 @@ export function buildFindingEnvelopePrompt(basePrompt, inventory) {
     source_position: c.source_position,
     source_locator: c.source_locator,
     hinted_severity: c.severity,
+    evidence_available: c.evidence_available,
   }));
   return `${basePrompt}\n\n## Machine observation response (required)\n\nReturn ONLY one JSON object with exactly ` +
     '`report_markdown` and `decisions`. `report_markdown` is the report requested above. ' +
@@ -256,7 +247,8 @@ export function buildFindingEnvelopePrompt(basePrompt, inventory) {
     'determinism deterministic/flaky/unverified/unknown. `taxonomy.fences` is a sorted, unique, non-empty array ' +
     'of none/migration/credential/schema/public-api/release/unknown; none and unknown cannot be combined with another fence. ' +
     '`evidence_status` is complete, incomplete, or unknown: it must be complete for verified/duplicate/rejected, ' +
-    'and incomplete or unknown for incomplete. `codebases` is a sorted, unique, non-empty array including the source codebase. ' +
+    'and incomplete or unknown for incomplete. A source with `evidence_available:false` must use outcome incomplete. ' +
+    '`codebases` is a sorted, unique, non-empty array including the source codebase. ' +
     `The required source codebase is ${JSON.stringify(inventory.codebase)}. ` +
     `Allowed codebases: ${JSON.stringify(inventory.allowed_codebases)}. ` +
     `Opaque inventory: ${JSON.stringify(opaque)}\n`;
@@ -275,6 +267,7 @@ export function parseFindingEnvelope(output, inventory, registry) {
     if (!expected.has(decision.source_key)) throw new Error(`invented source key: ${decision.source_key}`);
     if (byKey.has(decision.source_key)) throw new Error(`repeated source key: ${decision.source_key}`);
     if (!OUTCOMES.has(decision.outcome)) throw new Error(`invalid outcome for ${decision.source_key}`);
+    if (!inventory.candidates.find((candidate) => candidate.source_key === decision.source_key).evidence_available && decision.outcome !== "incomplete") throw new Error(`decision claims unavailable evidence for ${decision.source_key}`);
     if (!Array.isArray(decision.codebases) || !decision.codebases.length || decision.codebases.some((x) => !registered.has(x))) throw new Error(`unregistered codebase decision for ${decision.source_key}`);
     const sortedCodebases = [...new Set(decision.codebases)].sort();
     if (canonical(sortedCodebases) !== canonical(decision.codebases)) throw new Error(`codebases must be sorted and unique for ${decision.source_key}`);
@@ -442,42 +435,9 @@ export function validateFindingObservations(records, registry) {
   return true;
 }
 
-function pidAlive(pid) {
-  if (!Number.isInteger(pid) || pid < 1) return true;
-  try { process.kill(pid, 0); return true; } catch (e) { return e.code !== "ESRCH"; }
-}
-
-function acquireLock(lockPath, nowMs) {
-  try {
-    const fd = openSync(lockPath, "wx", 0o600);
-    writeFileSync(fd, `${JSON.stringify({ pid: process.pid, created_at_ms: nowMs })}\n`);
-    closeSync(fd); return;
-  } catch (e) {
-    if (e.code !== "EEXIST") throw e;
-  }
-  let lock; try { lock = JSON.parse(readFileSync(lockPath, "utf8")); } catch { throw new Error(`finding observation lock is invalid: ${lockPath}`); }
-  const createdAt = Number(lock.created_at_ms); const modifiedAt = statSync(lockPath).mtimeMs;
-  if (!Number.isFinite(createdAt) || !Number.isFinite(modifiedAt)) throw new Error(`finding observation lock is invalid: ${lockPath}`);
-  const age = nowMs - Math.max(createdAt, modifiedAt);
-  if (age <= LOCK_STALE_MS || pidAlive(Number(lock.pid))) throw new Error(`finding observation output is locked: ${lockPath}`);
-  unlinkSync(lockPath);
-  const fd = openSync(lockPath, "wx", 0o600); writeFileSync(fd, `${JSON.stringify({ pid: process.pid, created_at_ms: nowMs })}\n`); closeSync(fd);
-}
-
 export function writeFindingObservations(outputPath, records, registry, { nowMs = Date.now() } = {}) {
   validateFindingObservations(records, registry);
-  const target = path.resolve(outputPath); const lock = `${target}.lock`;
-  mkdirSync(path.dirname(target), { recursive: true }); acquireLock(lock, nowMs);
-  const temp = `${target}.tmp-${process.pid}-${randomUUID()}`;
-  try {
-    const bytes = `${records.map(canonical).join("\n")}\n`;
-    const fd = openSync(temp, "wx", 0o600);
-    try { writeFileSync(fd, bytes, "utf8"); fsyncSync(fd); } finally { closeSync(fd); }
-    renameSync(temp, target);
-  } finally {
-    if (existsSync(temp)) unlinkSync(temp);
-    if (existsSync(lock)) unlinkSync(lock);
-  }
+  writeAtomicJsonl(outputPath, `${records.map(canonical).join("\n")}\n`, { nowMs });
 }
 
 export function createFindingObservationSession({ outputPath, configPath, issue, pr, round, now, repoSlug }) {

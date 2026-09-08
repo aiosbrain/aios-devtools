@@ -130,7 +130,12 @@ test("opt-in inventory preserves GPT findings beyond the model prompt cap", asyn
   const inputs = gatherInputs({ runGh, slug: "aiosbrain/aios-devtools", pr: 44, localBugbotReviewPath: review, gptReviewPath: gptReview, preserveFullGpt: true });
   assert.equal(inputs.gptMarkdown.length < inputs.gptObservationMarkdown.length, true);
   assert.equal(inputs.gptMarkdown.includes(`truncated at ${GPT_REVIEW_CAP}`), true);
-  assert.deepEqual(normalizeFindingInventory(inputs, opts).candidates.map((x) => x.severity), ["high"]);
+  const inventory = normalizeFindingInventory(inputs, opts);
+  assert.deepEqual(inventory.candidates.map((x) => x.severity), ["high"]);
+  assert.equal(inventory.candidates[0].evidence_available, false);
+  assert.throws(() => parseFindingEnvelope(envelope(inventory), inventory, registry), /claims unavailable evidence/);
+  const incomplete = envelope(inventory, (value) => ({ ...value, outcome: "incomplete", evidence_status: "unknown" }));
+  assert.equal(parseFindingEnvelope(incomplete, inventory, registry).decisions.size, 1);
 });
 
 test("inventory uses the verdict's complete structured CI classification", () => {
@@ -336,6 +341,10 @@ test("writer is atomic, mode 0600, and refuses live or young locks", () => {
   utimesSync(`${out}.lock`, new Date(old), new Date(old));
   chmodSync(`${out}.lock`, 0o600);
   writeFindingObservations(out, records, registry);
+  writeFileSync(`${out}.lock`, JSON.stringify({ pid: 2147483647, created_at_ms: old }));
+  writeFileSync(`${out}.lock.recovery`, "recovery in progress\n");
+  utimesSync(`${out}.lock`, new Date(old), new Date(old));
+  assert.throws(() => writeFindingObservations(out, records, registry), /locked/);
 });
 
 test("structured prompt contains opaque keys but not source prose", () => {
