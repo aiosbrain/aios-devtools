@@ -27,6 +27,8 @@ export function sanitizedCheckIdentity(check) {
   if (typeof check.name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9 ._:/()@+,#\[\]-]{0,199}$/.test(check.name)) {
     throw new Error("unsafe CI check name");
   }
+  if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(check.name)
+    || /(?:\/Users\/|\/home\/)/.test(check.name)) throw new Error("private CI check name");
   if (!/^[A-Z_]{0,32}$/.test(check.state ?? "") || !/^[a-z_]{0,32}$/.test(check.bucket ?? "")
     || !/^[A-Z_]{0,32}$/.test(check.conclusion ?? "")) throw new Error("unsafe CI check state");
   return { name: check.name, state: check.state ?? "", bucket: check.bucket ?? "", conclusion: check.conclusion ?? "" };

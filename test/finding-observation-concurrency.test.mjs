@@ -17,6 +17,10 @@ test("CI candidate identities follow checks across source reordering", () => {
   const keyed = (inventory, ordered) => Object.fromEntries(inventory.candidates.map((candidate) =>
     [ordered[candidate.source_locator.item].name, candidate.source_key]));
   assert.deepEqual(keyed(make(checks), checks), keyed(make([...checks].reverse()), [...checks].reverse()));
+  for (const name of ["deploy synthetic.person@example.invalid", "build (/Users/synthetic/project)", "build:/home/synthetic/project"]) {
+    const unsafe = make([{ name, state: "FAILURE", bucket: "fail", conclusion: "" }]);
+    assert.equal(unsafe.candidates.length, 0); assert.equal(unsafe.malformed, 1);
+  }
 });
 
 test("a stale recovery guard is claimed without replacing a newer owner", () => {
