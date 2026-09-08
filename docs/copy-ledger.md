@@ -54,6 +54,12 @@ byte-identical to core and machine-enforced, but they are still *duplicates* —
 `unresolved`. The two columns answer different questions: Status is "who will own this", Byte
 parity is "can it rot while we decide".
 
+Rows 1–17 are the AIO-594 cut set. Rows 18–20 describe the **AIO-1072 companion
+mirror**. The shared locator imports the pure top-level classifier (row 20), keeping
+copied core code outside the devtools dispatcher dependency boundary. Row 18 retains
+the old classifier import path as a compatibility export. Row 19 remains a deliberately
+different CLI module, with no shared locator dependency on it.
+
 | # | Temporary copy | Required disposition | Status | Byte parity | Linear issue |
 |---|----------------|----------------------|--------|-------------|--------------|
 | 1 | `scripts/relay-core.mjs` | foundation export or Devtools-owned | unresolved | enforced | AIO-663 (entangled with AIO-684) |
@@ -73,6 +79,9 @@ parity is "can it rot while we decide".
 | 15 | `scripts/scan-file.mjs` | foundation scan export | unresolved | enforced | AIO-663 |
 | 16 | `scripts/toolkit-locate.mjs` | foundation locator export or separately versioned identical contract implementation | unresolved | enforced | AIO-663 |
 | 17 | `docs/devtools-toolkit-contract.md` | Devtools canonical; Workspace retains a short consumer contract/link | unresolved | exempt (this repo is the canonical owner by disposition; core keeps a shorter consumer-side contract. The two are deliberately different documents, not copies) | AIO-663 |
+| 18 | `scripts/cli/distribution-root.mjs` | compatibility export for row 20; moves with row 16 | unresolved | enforced | AIO-663 |
+| 19 | `scripts/cli.mjs` | same path, different CLI responsibilities: Workspace barrel versus devtools dispatcher; no copied locator imports the dispatcher | unresolved | exempt (deliberately different modules; classifier compatibility exports do not make the dispatchers copies) | AIO-663 |
+| 20 | `scripts/distribution-root.mjs` | pure shared classifier; foundation locator export or separately versioned identical contract with row 16 | unresolved | enforced | AIO-663 |
 
 Governance-stamp files (`scripts/check-file-size.mjs`, `scripts/check-boundaries.mjs`,
 `scripts/git-files.mjs`, `scripts/leak-gate.sh`, `validation/agent-readiness-lib.mjs`,
