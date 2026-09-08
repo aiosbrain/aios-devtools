@@ -7,6 +7,7 @@ import {
   SCHEMA_PATH,
   SCHEMA_SHA256,
   PIN_PATH,
+  PRODUCER_VERSION,
   buildFindingEnvelopePrompt,
   canonical,
   findingEventId,
@@ -19,6 +20,7 @@ import {
   validateFindingObservations,
   writeFindingObservations,
 } from "../scripts/finding-observations.mjs";
+import { extractFindingSeverityRecords, hasCriticalOrHighFindings } from "../scripts/severity.mjs";
 import { cmdConsolidateFindings } from "../scripts/consolidate-findings.mjs";
 import { parseCheckResults } from "../scripts/consolidate-findings.mjs";
 
@@ -49,6 +51,11 @@ const envelope = (inventory, transform = (d) => d) => JSON.stringify({
 test("vendored AIO-1098 schema has the exact published hash", () => {
   assert.equal(sha256(readFileSync(SCHEMA_PATH)), SCHEMA_SHA256);
   assert.equal(readFileSync(PIN_PATH, "utf8").trim().split(/\s+/)[0], SCHEMA_SHA256);
+  assert.equal(PRODUCER_VERSION, JSON.parse(readFileSync(path.join(path.dirname(SCHEMA_PATH), "..", "package.json"), "utf8")).version);
+  assert.equal(registry.producer.versions.includes(PRODUCER_VERSION), true);
+  const untrustedPath = path.join(mkdtempSync(path.join(tmpdir(), "finding-registry-")), "registry.json");
+  writeFileSync(untrustedPath, JSON.stringify({ ...registry, producer: { ...registry.producer, versions: ["0.0.0"] } }));
+  assert.throws(() => loadFindingRegistry(untrustedPath), /is not trusted/);
 });
 
 test("normalizes every supported dialect and projects a reconciled ledger", () => {
@@ -99,6 +106,24 @@ test("captures bracketed, table, and emphasized canonical Bugbot records", () =>
   assert.deepEqual(inventory.candidates.map((x) => x.source_position).sort(), [0, 1, 2]);
 });
 
+test("inventory uses the canonical severity records for compact bullets, headings, and GPT", () => {
+  const compact = "-Critical: scripts/x.mjs:12 — auth bypass";
+  assert.equal(hasCriticalOrHighFindings(compact), true);
+  assert.deepEqual(extractFindingSeverityRecords(compact).map((x) => x.severity), ["Critical"]);
+  const compactInventory = normalizeFindingInventory({ ...BASE_INPUTS, localBugbotMarkdown: compact, gptMarkdown: null, issueComments: [], checks: { checks: [] } }, opts);
+  assert.deepEqual(compactInventory.candidates.map((x) => x.severity), ["critical"]);
+
+  const heading = "### [High] scripts/x.mjs:12 — not a canonical finding";
+  assert.equal(hasCriticalOrHighFindings(heading), false);
+  assert.equal(normalizeFindingInventory({ ...BASE_INPUTS, localBugbotMarkdown: heading, gptMarkdown: null, issueComments: [], checks: { checks: [] } }, opts).raw_candidates, 0);
+
+  const gpt = "- `High` `scripts/x.mjs`: one finding";
+  assert.deepEqual(extractFindingSeverityRecords(gpt).map((x) => x.severity), ["High"]);
+  const gptInventory = normalizeFindingInventory({ ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: gpt, issueComments: [], checks: { checks: [] } }, opts);
+  assert.equal(gptInventory.raw_candidates, 1);
+  assert.equal(gptInventory.candidates[0].severity, "high");
+});
+
 test("source ordering and exact replay preserve identities and bytes", () => {
   const sourceInputs = { ...BASE_INPUTS, issueComments: [{ body: "**Major:** crash" }, { body: "**Minor:** docs" }] };
   const a = normalizeFindingInventory(sourceInputs, opts);
@@ -133,10 +158,11 @@ test("clear completion is proven zero while unavailable capture is unknown", () 
   assert.equal(cleanRecords.length, 1);
   assert.deepEqual(cleanRecords[0].counts, { raw_candidates: 0, emitted_candidates: 0, terminal_stage: 0, incomplete: 0, malformed: 0 });
   assert.equal(cleanRecords[0].detector_completed, true);
-  const unknown = projectUnknownSummary({ issue: "AIO-1100", pr: 44, observedAt: "2026-09-08T00:00:00Z", registry });
+  const unknown = projectUnknownSummary({ issue: "AIO-1100", pr: 44, observedAt: "2026-09-08T00:00:00Z", registry, repoSlug: "aiosbrain/aios-devtools" });
   assert.equal(validateFindingObservations(unknown, registry), true);
   assert.equal(unknown[0].capture_status, "unknown");
   assert.equal(unknown[0].counts.raw_candidates, null);
+  assert.equal(unknown[0].attribution.program_id, cleanRecords[0].attribution.program_id);
 });
 
 test("provider failure after capture produces discovered/incomplete partial evidence", () => {

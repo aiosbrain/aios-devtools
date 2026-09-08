@@ -41,6 +41,7 @@ import { resolveLoopModels } from "./loop-models.mjs";
 // The verdict matchers live in the core leaf severity.mjs (AIO-594 F1) — a devtools-bound
 // file must not statically import stays-core review-bugbot.mjs.
 import {
+  extractFindingSeverityRecords,
   hasCriticalOrHighFindings,
   hasFindingsAtOrAbove,
   normalizeSeverity,
@@ -216,13 +217,9 @@ export function extractLocalBugbotSeverities(markdown) {
 
 // GPT-5.5 review markdown lists findings as `- \`High\` \`file\`: …`.
 export function extractGptSeverities(gptMarkdown) {
-  let max = null;
-  const re = /^\s*-\s*`(Critical|High|Medium|Low)`/gim;
-  let m;
-  while ((m = re.exec(gptMarkdown ?? "")) !== null) {
-    max = maxSev(max, normalizeSeverity(m[1]));
-  }
-  return max;
+  return extractFindingSeverityRecords(gptMarkdown)
+    .map(({ severity }) => severity)
+    .reduce((max, severity) => maxSev(max, severity), null);
 }
 
 // CodeRabbit prose → severity, mapped conservatively UPWARD: "potential issue"/"Major" →
@@ -581,12 +578,17 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
     return 1;
   }
   const round = Number.isFinite(opts.round) && opts.round > 0 ? opts.round : 1;
+  const slug = opts.repoSlug ?? detectRepo(repo);
+  if (!slug) {
+    console.error(c.red("error: could not detect the target repo — pass --repo owner/repo."));
+    return 1;
+  }
   let findingSession = null;
   if (opts.findingObservations) {
     try {
       findingSession = createFindingObservationSession({
         outputPath: opts.findingObservations, configPath: opts.findingConfig,
-        issue: opts.issue, pr: opts.pr, round, now: deps.now,
+        issue: opts.issue, pr: opts.pr, round, now: deps.now, repoSlug: slug,
       });
     } catch (e) {
       console.error(c.red(`error: finding observations config failed: ${e.message}`));
@@ -599,12 +601,6 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
 
   const runGh = deps.runGh ?? defaultRunGh;
   const readReviewerPrompt = deps.readReviewerPrompt ?? (() => defaultReadReviewerPrompt(repo));
-
-  const slug = opts.repoSlug ?? detectRepo(repo);
-  if (!slug) {
-    console.error(c.red("error: could not detect the target repo — pass --repo owner/repo."));
-    return 1;
-  }
 
   let reviewerPrompt;
   try {
@@ -646,7 +642,7 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
 
   let findingInventory = null;
   if (findingSession) {
-    try { findingInventory = findingSession.capture(inputs, slug); }
+    try { findingInventory = findingSession.capture(inputs); }
     catch (e) {
       console.error(c.red(`error: finding inventory failed: ${e.message}`));
       reportObservationError(findingSession.writeUnknown());

@@ -16,6 +16,7 @@ import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
+import { extractFindingSeverityRecords } from "./severity.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONTRACTS = path.join(HERE, "..", "contracts");
@@ -24,7 +25,7 @@ export const REGISTRY_PATH = path.join(CONTRACTS, "finding-observations.registry
 export const PIN_PATH = path.join(CONTRACTS, "finding-observations.v1.sha256");
 export const SCHEMA_SHA256 = "a51f360769ab26440287891867447baf6e3df93073df6f0d7febc1f3c10322b2";
 export const PRODUCER_NAME = "aios-devtools";
-export const PRODUCER_VERSION = "0.3.1";
+export const PRODUCER_VERSION = JSON.parse(readFileSync(path.join(HERE, "..", "package.json"), "utf8")).version;
 const DOMAIN_CANDIDATE = "aios.finding.candidate.discovery.v1\0";
 const DOMAIN_EVENT = "aios.finding.event.v1\0";
 const LOCK_STALE_MS = 15 * 60 * 1000;
@@ -97,28 +98,15 @@ function parseIssue(issue) {
   return m ? { type: "linear", team: m[1], number: Number(m[2]) } : null;
 }
 
-function severityFromText(text, dialect) {
-  const source = String(text ?? "");
-  if (dialect === "gpt") {
-    return [...source.matchAll(/^\s*-\s*`(Critical|High|Medium|Low)`/gim)].map((m) => m[1].toLowerCase());
-  }
-  const out = [];
-  const prefix = String.raw`\s*(?:(?:[-*]|\d+[.)]|#{1,6})\s+)?(?:\*\*|__|\*|_)?`;
-  const suffix = String.raw`(?:\*\*|__|\*|_)?`;
-  const patterns = [
-    new RegExp(`^${prefix}\\[(Critical|High|Medium|Low)\\]${suffix}`, "i"),
-    new RegExp(`^${prefix}\`?(Critical|High|Medium|Low)\\s+Severity\`?${suffix}\\s*(?::|—|-\\s+|$)`, "i"),
-    new RegExp(`^${prefix}\`?(Critical|High|Medium|Low)\`?${suffix}\\s*(?::|—|-\\s+)`, "i"),
-    /^\s*\|\s*(?:\*\*)?`?(Critical|High|Medium|Low)`?(?:\*\*)?\s*\|/i,
-  ];
-  for (const line of source.split("\n")) {
-    for (const pattern of patterns) {
-      const match = line.match(pattern);
-      if (match) { out.push(match[1].toLowerCase()); break; }
-    }
-  }
-  return out;
+function resolvePartition(registry, issue, repoSlug) {
+  const codebase = registry.codebase_mappings[repoSlug];
+  if (!codebase) throw new Error(`unregistered repository mapping: ${repoSlug}`);
+  const issueRef = parseIssue(issue);
+  if (!issueRef || !registry.linear_teams.includes(issueRef.team)) throw new Error(`unregistered issue team: ${issue}`);
+  return { codebase, issueRef };
 }
+
+const canonicalSeverities = (text) => extractFindingSeverityRecords(text).map(({ severity }) => severity.toLowerCase());
 
 function codeRabbitSeverities(body) {
   const text = String(body ?? "");
@@ -131,7 +119,7 @@ function codeRabbitSeverities(body) {
     return "low";
   });
   if (found.length) return found;
-  const listed = severityFromText(text, "bugbot");
+  const listed = canonicalSeverities(text);
   if (listed.length) return listed;
   return /potential issue|severity/i.test(text) ? ["unknown"] : [];
 }
@@ -142,8 +130,8 @@ function makeInventoryRecords(inputs) {
   if (!inputs.checks?.checks?.length && (inputs.checks?.ciRed || inputs.checks?.ciPending)) {
     throw new Error("plaintext CI evidence has no trustworthy candidate denominator");
   }
-  sources.push({ source_type: "local-bugbot", severities: severityFromText(inputs.localBugbotMarkdown, "bugbot") });
-  sources.push({ source_type: "gpt", severities: severityFromText(inputs.gptMarkdown, "gpt") });
+  sources.push({ source_type: "local-bugbot", severities: canonicalSeverities(inputs.localBugbotMarkdown) });
+  sources.push({ source_type: "gpt", severities: canonicalSeverities(inputs.gptMarkdown) });
   for (const [source_type, items] of [
     ["coderabbit-issue", inputs.issueComments], ["coderabbit-inline", inputs.inlineComments],
     ["coderabbit-review", inputs.reviews],
@@ -196,10 +184,7 @@ export function loadFindingRegistry(configPath = null) {
 }
 
 export function normalizeFindingInventory(inputs, { repoSlug, issue, pr, round = 1, registry, observedAt }) {
-  const codebase = registry.codebase_mappings[repoSlug];
-  if (!codebase) throw new Error(`unregistered repository mapping: ${repoSlug}`);
-  const issueRef = parseIssue(issue);
-  if (!issueRef || !registry.linear_teams.includes(issueRef.team)) throw new Error(`unregistered issue team: ${issue}`);
+  const { codebase, issueRef } = resolvePartition(registry, issue, repoSlug);
   const { candidates, malformed } = makeInventoryRecords(inputs);
   const sanitized = candidates.map(({ source_type, source_position, severity, source_artifact_sha256, source_key }) => ({
     source_type, source_position, severity, source_artifact_sha256, source_key,
@@ -338,11 +323,10 @@ export function projectFindingObservations(inventory, parsed = null, { partial =
   return [...records, summary];
 }
 
-export function projectUnknownSummary({ issue, pr, round = 1, observedAt, registry }) {
-  const issueRef = parseIssue(issue);
-  if (!issueRef || !registry.linear_teams.includes(issueRef.team)) throw new Error(`unregistered issue team: ${issue}`);
+export function projectUnknownSummary({ issue, pr, round = 1, observedAt, registry, repoSlug }) {
+  const { codebase, issueRef } = resolvePartition(registry, issue, repoSlug);
   const run_id = sha256(canonical({ issue, pr: Number(pr), round, capture_status: "unknown" }));
-  const inventory = { run_id, program_id: sha256(canonical({ issue })), attribution_run_id: run_id, issue_ref: issueRef, observed_at: observedAt, attempt: round };
+  const inventory = { run_id, program_id: sha256(canonical({ issue, codebase })), attribution_run_id: run_id, issue_ref: issueRef, observed_at: observedAt, attempt: round };
   return [eventWithId({
     ...common(inventory, "unknown"), record_type: "run_summary", stage: "discovery", capture_status: "unknown",
     detector_completed: null, detector_evidence_sha256: null,
@@ -456,19 +440,20 @@ export function writeFindingObservations(outputPath, records, registry, { nowMs 
   }
 }
 
-export function createFindingObservationSession({ outputPath, configPath, issue, pr, round, now }) {
+export function createFindingObservationSession({ outputPath, configPath, issue, pr, round, now, repoSlug }) {
   if (!outputPath) return null;
   const registry = loadFindingRegistry(configPath);
+  resolvePartition(registry, issue, repoSlug);
   const observedAt = new Date(now ? now() : Date.now()).toISOString().replace(/\.\d{3}Z$/, "Z");
   const safeWrite = (records) => {
     try { writeFindingObservations(outputPath, records, registry); return null; }
     catch (error) { return error; }
   };
   return {
-    capture: (inputs, repoSlug) => normalizeFindingInventory(inputs, { repoSlug, issue, pr, round, registry }),
+    capture: (inputs) => normalizeFindingInventory(inputs, { repoSlug, issue, pr, round, registry }),
     prompt: buildFindingEnvelopePrompt,
     parse: (output, inventory) => parseFindingEnvelope(output, inventory, registry),
-    writeUnknown: () => safeWrite(projectUnknownSummary({ issue, pr, round, observedAt, registry })),
+    writeUnknown: () => safeWrite(projectUnknownSummary({ issue, pr, round, observedAt, registry, repoSlug })),
     writePartial: (inventory) => safeWrite(projectFindingObservations(inventory, null, { partial: true })),
     writeComplete: (inventory, parsed) => safeWrite(projectFindingObservations(inventory, parsed)),
   };

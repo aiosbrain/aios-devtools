@@ -53,45 +53,48 @@ export function canonicalSeverity(value) {
   return found ?? null;
 }
 
-// Structural matchers for a listed Critical/High finding: a leading bullet
-// (`- Critical: …`), a leading severity table cell (`| High |`), or the bracket form
-// (`[High] file:line — …`) that the consolidated findings report (code-reviewer.md's
-// "Output format") emits. Prose such as "no Critical or High findings" matches NONE of
-// these — only an actual listed finding. This is the single severity dialect: both the
-// Cursor review loop and the consolidator gate on the same matcher.
+// Structural matchers for listed findings: a leading bullet (`- Critical: …`), a leading
+// severity table cell (`| High |`), the bracket form (`[High] file:line — …`) emitted by
+// code-reviewer.md, or GPT's backticked severity/file bullet. Prose such as "no Critical or
+// High findings" matches NONE of these — only an actual listed finding. This is the single
+// severity dialect for the review loop, consolidator gate, and observation inventory.
 // All three tolerate markdown emphasis around the severity (`**[High]**`, `**High**`): the
 // consolidator model bolds findings, and a decoration-blind matcher silently downgraded a
 // BLOCKED round to CLEAR (AIO-239 / observation.md §9 — the verdict must not hinge on `**`).
-const MD = "(?:\\*\\*|__|\\*|_)?"; // optional emphasis opener/closer
+// Keep every supported record shape here so boolean gating and observation inventory
+// consume the exact same per-line classification.
+const FINDING_PATTERNS = [
+  /^\s*(?:(?:[-*]|\d+[.)]|#{1,6})\s+)?(?:\*\*|__|\*|_)?`?(Critical|High|Medium|Low)\s+Severity`?(?:\*\*|__|\*|_)?\s*(?::|—|-\s+|$)/i,
+  /^\s*(?:[-*]|\d+[.)])\s*`(Critical|High|Medium|Low)`\s+`[^`\n]+`/i,
+  /^\s*(?:[-*]|\d+[.)])\s*(?:\*\*|__|\*|_)?`?(Critical|High|Medium|Low)`?(?:\*\*|__|\*|_)?\s*(?::|—|-\s+)/i,
+  /^\s*(?:[-*]|\d+[.)])\s*(?:\*\*|__|\*|_)?\[(Critical|High|Medium|Low)\](?:\*\*|__|\*|_)?/i,
+  /^\s*\|\s*(?:\*\*|__|\*|_)?`?(Critical|High|Medium|Low)`?(?:\*\*|__|\*|_)?\s*\|/i,
+  /^\s*(?:\*\*|__|\*|_)?\[(Critical|High|Medium|Low)\](?:\*\*|__|\*|_)?/i,
+  /^\s*(?:\*\*|__|\*|_)?`?(Critical|High|Medium|Low)`?(?:\*\*|__|\*|_)?\s*(?::|—|-\s+)/i,
+];
+
+/** Canonical severity records, at most one classification for each source line. */
+export function extractFindingSeverityRecords(text) {
+  const records = [];
+  for (const [lineIndex, line] of String(text ?? "").split("\n").entries()) {
+    for (const pattern of FINDING_PATTERNS) {
+      const match = line.match(pattern);
+      if (!match) continue;
+      records.push({ line: lineIndex + 1, severity: canonicalSeverity(match[1]) });
+      break;
+    }
+  }
+  return records;
+}
 
 /** True when review text contains a listed finding at or above the requested severity. */
 export function hasFindingsAtOrAbove(text, failOn = "high") {
   const canonical = canonicalSeverity(failOn);
   if (!canonical) throw new Error(`invalid Bugbot severity: ${failOn}`);
   const threshold = SEVERITY_RANK[canonical];
-  const severity = "(Critical|High|Medium|Low)";
-  const patterns = [
-    new RegExp(
-      `^\\s*(?:(?:[-*]|\\d+[.)]|#{1,6})\\s+)?${MD}\`?${severity}\\s+Severity\`?${MD}\\s*(?::|—|-\\s+|$)`,
-      "i"
-    ),
-    new RegExp(`^\\s*(?:[-*]|\\d+[.)])\\s*${MD}\`?${severity}\`?${MD}\\s*(?::|—|-\\s+)`, "i"),
-    new RegExp(`^\\s*(?:[-*]|\\d+[.)])\\s*${MD}\\[${severity}\\]${MD}`, "i"),
-    new RegExp(`^\\s*\\|\\s*${MD}\`?${severity}\`?${MD}\\s*\\|`, "i"),
-    new RegExp(`^\\s*${MD}\\[${severity}\\]`, "i"),
-    new RegExp(`^\\s*${MD}\`?${severity}\`?${MD}\\s*(?::|—|-\\s+)`, "i"),
-  ];
-  return String(text ?? "")
-    .split("\n")
-    .some((line) => {
-      for (const pattern of patterns) {
-        const match = line.match(pattern);
-        if (!match) continue;
-        const listed = canonicalSeverity(match[1]);
-        if (listed && SEVERITY_RANK[listed] >= threshold) return true;
-      }
-      return false;
-    });
+  return extractFindingSeverityRecords(text).some(
+    ({ severity }) => SEVERITY_RANK[severity] >= threshold
+  );
 }
 
 /** True when review text lists a Critical/High finding (bullet, table row, or bracket). */
