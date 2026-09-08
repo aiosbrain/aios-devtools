@@ -130,6 +130,12 @@ test("finding identity covers legacy heading bodies and mixed CodeRabbit dialect
     }],
   }, opts);
   assert.deepEqual(mixedBadge.candidates.map((x) => x.severity).sort(), ["high", "low"]);
+  const sameSeverity = normalizeFindingInventory({
+    ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null, checks: { checks: [] }, issueComments: [{
+      body: "_⚠️ Potential issue_ | _🟠 Major_\n\n**Null input crashes.**\n\n[High] src/b.mjs:1 — Authorization bypass.",
+    }],
+  }, opts);
+  assert.deepEqual(sameSeverity.candidates.map((x) => x.severity), ["high", "high"]);
   const bundled = normalizeFindingInventory({
     ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null, checks: { checks: [] }, issueComments: [],
     reviews: [{ body: "_⚠️ Potential issue_ | _🟠 Major_\n\n**Null input crashes.**\n\n_⚠️ Potential issue_ | _🟡 Minor_\n\n**Fallback is incorrect.**" }],
