@@ -136,6 +136,11 @@ test("opt-in inventory preserves GPT findings beyond the model prompt cap", asyn
   assert.throws(() => parseFindingEnvelope(envelope(inventory), inventory, registry), /claims unavailable evidence/);
   const incomplete = envelope(inventory, (value) => ({ ...value, outcome: "incomplete", evidence_status: "unknown" }));
   assert.equal(parseFindingEnvelope(incomplete, inventory, registry).decisions.size, 1);
+
+  writeFileSync(gptReview, `- \`Low\` visible finding\n\n- \`High\` partial finding\n${"x".repeat(21000)}`);
+  const mixedInputs = gatherInputs({ runGh, slug: "aiosbrain/aios-devtools", pr: 44, localBugbotReviewPath: review, gptReviewPath: gptReview, preserveFullGpt: true });
+  const mixed = normalizeFindingInventory(mixedInputs, opts);
+  assert.deepEqual(mixed.candidates.map((candidate) => candidate.evidence_available).sort(), [false, true]);
 });
 
 test("inventory uses the verdict's complete structured CI classification", () => {

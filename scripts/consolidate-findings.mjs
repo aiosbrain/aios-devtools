@@ -495,7 +495,10 @@ export function gatherInputs({ runGh, slug, pr, localBugbotReviewPath, gptReview
     localBugbotMarkdown,
     gptMarkdown,
   };
-  if (preserveFullGpt) gathered.gptObservationMarkdown = gptObservationMarkdown;
+  if (preserveFullGpt) {
+    gathered.gptObservationMarkdown = gptObservationMarkdown;
+    gathered.gptObservationVisibleChars = Math.min(gptObservationMarkdown?.length ?? 0, GPT_REVIEW_CAP);
+  }
   return gathered;
 }
 

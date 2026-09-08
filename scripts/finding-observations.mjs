@@ -96,11 +96,15 @@ function resolvePartition(registry, issue, repoSlug) {
 }
 
 function textFindingRecords(text, dialect = "canonical") {
-  const lines = String(text ?? "").split("\n");
+  const source = String(text ?? "");
+  const lines = source.split("\n");
+  const starts = []; let offset = 0;
+  for (const line of lines) { starts.push(offset); offset += line.length + 1; }
   const found = extractFindingSeverityRecords(text, { dialect });
   return found.map(({ line, severity }, index) => ({
     severity: severity.toLowerCase(),
     evidence_sha256: sha256(lines.slice(line - 1, (found[index + 1]?.line ?? lines.length + 1) - 1).join("\n")),
+    evidence_end_offset: found[index + 1] ? starts[found[index + 1].line - 1] : source.length,
     source_locator: { kind: "line", line },
   }));
 }
@@ -154,8 +158,8 @@ function makeInventoryRecords(inputs) {
     throw new Error("plaintext CI evidence has no trustworthy candidate denominator");
   }
   sources.push({ source_type: "local-bugbot", records: textFindingRecords(inputs.localBugbotMarkdown) });
-  const gptEvidenceAvailable = inputs.gptObservationMarkdown === undefined || inputs.gptObservationMarkdown === inputs.gptMarkdown;
-  sources.push({ source_type: "gpt", records: textFindingRecords(inputs.gptObservationMarkdown ?? inputs.gptMarkdown, "gpt").map((record) => ({ ...record, evidence_available: gptEvidenceAvailable })) });
+  const visibleChars = inputs.gptObservationVisibleChars ?? Number.POSITIVE_INFINITY;
+  sources.push({ source_type: "gpt", records: textFindingRecords(inputs.gptObservationMarkdown ?? inputs.gptMarkdown, "gpt").map((record) => ({ ...record, evidence_available: record.evidence_end_offset <= visibleChars })) });
   for (const [source_type, items] of [
     ["coderabbit-issue", inputs.issueComments], ["coderabbit-inline", inputs.inlineComments],
     ["coderabbit-review", inputs.reviews],
