@@ -4,10 +4,11 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import Ajv2020 from "ajv/dist/2020.js";
 import { extractFindingSeverityRecords } from "./finding-severity-records.mjs";
+import { extractCodeRabbitFindingRecords } from "./coderabbit-finding-records.mjs";
 import { checkIsPending, checkIsRed, sanitizedCheckIdentity } from "./ci-status.mjs";
 import { acquireAtomicJsonlLease, releaseAtomicJsonlLease, writeAtomicJsonl } from "./atomic-jsonl.mjs";
+import { validateFindingLedger } from "./finding-observation-validator.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONTRACTS = path.join(HERE, "..", "contracts");
 export const SCHEMA_PATH = path.join(CONTRACTS, "finding-observations.v1.schema.json");
@@ -28,26 +29,6 @@ const TAXONOMY = {
   fences: new Set(["none", "migration", "credential", "schema", "public-api", "release", "unknown"]),
 };
 const OUTCOMES = new Set(["verified", "duplicate", "rejected", "incomplete"]);
-const TRANSITIONS = new Map([
-  ["discovered", new Set(["verified", "duplicate", "rejected", "incomplete"])],
-  ["verified", new Set(["filed", "duplicate", "rejected", "incomplete"])],
-  ["filed", new Set(["queue_eligible", "duplicate", "rejected", "incomplete"])],
-  ["queue_eligible", new Set(["selected", "duplicate", "rejected", "incomplete"])],
-  ["selected", new Set(["remediation_started", "duplicate", "rejected", "incomplete"])],
-  ["remediation_started", new Set(["merged", "duplicate", "rejected", "incomplete"])],
-  ["merged", new Set(["resolved", "incomplete"])],
-  ["resolved", new Set(["escaped", "reopened"])],
-  ["escaped", new Set(["reopened", "incomplete"])],
-  ["duplicate", new Set(["reopened"])], ["rejected", new Set(["reopened"])],
-  ["incomplete", new Set(["reopened"])],
-  ["reopened", new Set(["verified", "duplicate", "rejected", "incomplete"])],
-]);
-const TERMINAL = new Map([
-  ["discovery", new Set(["verified", "filed", "queue_eligible", "selected", "remediation_started", "merged", "resolved", "duplicate", "rejected"])],
-  ["filing", new Set(["filed", "queue_eligible", "selected", "remediation_started", "merged", "resolved", "duplicate", "rejected"])],
-  ["remediation", new Set(["merged", "resolved", "duplicate", "rejected"])],
-  ["resolution", new Set(["resolved", "duplicate", "rejected"])],
-]);
 const DECISION_KEYS = new Set([
   "source_key", "outcome", "duplicate_target", "codebases", "taxonomy", "evidence_status",
 ]);
@@ -57,7 +38,10 @@ const LINKS = Object.freeze({ linear: null, scanner: null, pull_request: null, m
 export function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object") {
-    return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}`;
+    const members = Object.keys(value)
+      .sort((left, right) => left.localeCompare(right))
+      .map((key) => [JSON.stringify(key), canonical(value[key])].join(":"));
+    return ["{", members.join(","), "}"].join("");
   }
   return JSON.stringify(value);
 }
@@ -83,7 +67,7 @@ function exactKeys(value, allowed, label) {
 }
 
 function parseIssue(issue) {
-  const m = String(issue).match(/^([A-Z][A-Z0-9]{1,9})-(\d+)$/);
+  const m = /^([A-Z][A-Z0-9]{1,9})-(\d+)$/.exec(String(issue));
   return m ? { type: "linear", team: m[1], number: Number(m[2]) } : null;
 }
 
@@ -109,112 +93,126 @@ function textFindingRecords(text, dialect = "canonical") {
   }));
 }
 
+function codeRabbitTimestamp(value, key) {
+  if (value[key] === undefined) return null;
+  if (typeof value[key] !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value[key])) {
+    throw new Error(`unsafe CodeRabbit ${key}`);
+  }
+  return value[key];
+}
+
+function codeRabbitState(value) {
+  if (value.state === undefined) return null;
+  if (typeof value.state !== "string" || !/^[A-Z_]{1,32}$/.test(value.state)) {
+    throw new Error("unsafe CodeRabbit state");
+  }
+  return value.state;
+}
+
+function codeRabbitPath(value) {
+  if (value.path === undefined) return null;
+  if (typeof value.path !== "string" || value.path.length > 500 || value.path.startsWith("/")
+    || /(^|\/)\.\.(\/|$)|[\u0000-\u001f]|=/.test(value.path)) throw new Error("unsafe CodeRabbit path");
+  const at = value.path.indexOf("@");
+  const dot = value.path.indexOf(".", at + 2);
+  const slash = value.path.indexOf("/", at + 1);
+  if (at > 0 && dot > at + 1 && (slash < 0 || slash > dot)) throw new Error("unsafe CodeRabbit path");
+  return value.path;
+}
+
 function codeRabbitItemIdentity(value) {
   const identity = {};
   if (value.id !== undefined) {
     if (!Number.isInteger(value.id) || value.id < 1) throw new Error("unsafe CodeRabbit id");
     identity.id = value.id;
   }
-  if (value.path !== undefined) {
-    if (typeof value.path !== "string" || value.path.length > 500 || value.path.startsWith("/") || /(^|\/)\.\.(\/|$)|[\u0000-\u001f]/.test(value.path)) throw new Error("unsafe CodeRabbit path");
-    identity.path = value.path;
-  }
+  const itemPath = codeRabbitPath(value);
+  if (itemPath !== null) identity.path = itemPath;
   if (value.line !== undefined && value.line !== null) {
     if (!Number.isInteger(value.line) || value.line < 1) throw new Error("unsafe CodeRabbit line");
     identity.line = value.line;
   }
-  for (const key of ["created_at", "submitted_at", "state"]) {
-    if (value[key] !== undefined) {
-      if (typeof value[key] !== "string" || value[key].length > 64 || /[\u0000-\u001f]/.test(value[key])) throw new Error(`unsafe CodeRabbit ${key}`);
-      identity[key] = value[key];
-    }
-  }
-  return sha256(canonical({ fields: Object.keys(identity).sort(), id: identity.id ?? null, line: identity.line ?? null }));
+  const createdAt = codeRabbitTimestamp(value, "created_at");
+  const submittedAt = codeRabbitTimestamp(value, "submitted_at");
+  const state = codeRabbitState(value);
+  if (createdAt !== null) identity.created_at = createdAt;
+  if (submittedAt !== null) identity.submitted_at = submittedAt;
+  if (state !== null) identity.state = state;
+  const fields = Object.keys(identity).sort((left, right) => left.localeCompare(right));
+  return sha256(canonical({ fields, id: identity.id ?? null, line: identity.line ?? null,
+    path: identity.path ?? null, created_at: createdAt, submitted_at: submittedAt, state }));
 }
 
-function codeRabbitRecords(body, item, itemIdentity) {
-  const text = String(body ?? "");
-  const lines = text.split("\n");
-  const structured = [...text.matchAll(/\*\*(critical|blocker|major|high|medium|minor|low|nitpick)(?:\s+severity)?(?::\*\*|\*\*\s*:)/gi)];
-  const found = structured.map((m) => {
-    const token = m[1].toLowerCase();
-    const severity = ["critical", "blocker"].includes(token) ? "critical"
-      : ["major", "high"].includes(token) ? "high"
-        : ["medium", "minor"].includes(token) ? "medium" : "low";
-    const line = text.slice(0, m.index).split("\n").length;
-    return { severity, line };
-  });
-  for (const { line, severity } of extractFindingSeverityRecords(text)) {
-    if (!found.some((record) => record.line === line)) found.push({ line, severity: severity.toLowerCase() });
-  }
-  for (const [index, lineText] of lines.entries()) {
-    if (found.some((record) => record.line === index + 1)) continue;
-    const label = lineText.match(/^\s*(?:[-*]\s*)?(?:\*\*|__)?(major|minor|nitpick)(?:\*\*|__)?(?:\s*(?::|—|-)\s*|\s+).+/i)?.[1]?.toLowerCase();
-    const severity = label === "major" ? "high" : label === "minor" ? "medium" : label === "nitpick" ? "low"
-      : /^\s*_[^A-Za-z0-9]*nitpick_\s*$/i.test(lineText) ? "low" : null;
-    if (severity) found.push({ line: index + 1, severity });
-  }
-  const potentialLines = lines.flatMap((line, index) => /potential issue/i.test(line) ? [{ line: index + 1, text: line }] : []);
-  for (const potential of potentialLines) {
-    if (found.some((record) => record.line === potential.line)) continue;
-    const token = potential.text.match(/(critical|blocker|major|minor|nitpick)/i)?.[1]?.toLowerCase();
-    const badgeSeverity = ["critical", "blocker"].includes(token) ? "critical" : token === "minor" ? "medium" : token === "nitpick" ? "low" : "high";
-    const nextContent = lines.findIndex((line, lineIndex) => lineIndex + 1 > potential.line && line.trim()) + 1;
-    const hasFollowingLabel = found.some((record) => record.line === nextContent && (!token || record.severity === badgeSeverity));
-    if (hasFollowingLabel) continue;
-    found.push({ line: potential.line, severity: badgeSeverity });
-  }
-  found.sort((a, b) => a.line - b.line);
-  if (found.length) return found.map(({ line, severity }) => ({
-    severity,
-    evidence_sha256: sha256(canonical({ item: itemIdentity, line, severity })),
-    source_locator: { kind: "item-line", item, line },
-  }));
-  return /severity/i.test(text)
-    ? [{ severity: "unknown", evidence_sha256: sha256(canonical({ item: itemIdentity, line: 1, severity: "unknown" })), source_locator: { kind: "item-line", item, line: 1 } }]
-    : [];
-}
-
-function makeInventoryRecords(inputs) {
-  const sources = [];
+function codeRabbitSource(sourceType, items) {
+  const records = [];
   let malformed = 0;
-  if (!inputs.checks?.checks?.length && (inputs.checks?.ciRed || inputs.checks?.ciPending)) {
-    throw new Error("plaintext CI evidence has no trustworthy candidate denominator");
-  }
-  sources.push({ source_type: "local-bugbot", records: textFindingRecords(inputs.localBugbotMarkdown) });
-  const visibleChars = inputs.gptObservationVisibleChars ?? Number.POSITIVE_INFINITY;
-  sources.push({ source_type: "gpt", records: textFindingRecords(inputs.gptObservationMarkdown ?? inputs.gptMarkdown, "gpt").map((record) => ({ ...record, evidence_available: record.evidence_end_offset <= visibleChars })) });
-  for (const [source_type, items] of [
-    ["coderabbit-issue", inputs.issueComments], ["coderabbit-inline", inputs.inlineComments],
-    ["coderabbit-review", inputs.reviews],
-  ]) {
-    const records = [];
-    for (const [itemIndex, item] of (items ?? []).entries()) {
-      if (!item || typeof item !== "object" || (item.body !== undefined && typeof item.body !== "string")) { malformed++; continue; }
-      try { records.push(...codeRabbitRecords(item.body, itemIndex, codeRabbitItemIdentity(item))); }
-      catch { malformed++; }
+  for (const [itemIndex, item] of (items ?? []).entries()) {
+    if (!item || typeof item !== "object" || (item.body !== undefined && typeof item.body !== "string")) {
+      malformed++;
+      continue;
     }
-    sources.push({ source_type, records });
+    try {
+      const digest = (value) => sha256(canonical(value));
+      records.push(...extractCodeRabbitFindingRecords(item.body, itemIndex, codeRabbitItemIdentity(item), digest));
+    } catch {
+      malformed++;
+    }
   }
+  return { source: { source_type: sourceType, records }, malformed };
+}
+
+function ciSource(checks) {
   const ci = [];
-  for (const [item, check] of (inputs.checks?.checks ?? []).entries()) {
-    const classification = checkIsRed(check) ? "red" : checkIsPending(check) ? "pending" : null;
+  let malformed = 0;
+  for (const [item, check] of (checks ?? []).entries()) {
+    if (!check || typeof check !== "object" || Array.isArray(check)) {
+      malformed++;
+      continue;
+    }
+    let classification = null;
+    if (checkIsRed(check)) classification = "red";
+    else if (checkIsPending(check)) classification = "pending";
     if (!classification) continue;
     try {
       const check_identity_sha256 = sha256(canonical(sanitizedCheckIdentity(check)));
-      ci.push({ severity: classification === "red" ? "high" : "unknown",
+      const severity = classification === "red" ? "high" : "unknown";
+      ci.push({ severity,
         evidence_sha256: sha256(canonical({ classification, check_identity_sha256 })), source_locator: { kind: "check", item } });
-    } catch { malformed++; }
+    } catch {
+      malformed++;
+    }
   }
-  sources.push({ source_type: "ci", records: ci });
-  const candidates = sources.flatMap(({ source_type, records }) => {
-    const ordered = [...records].sort((a, b) => a.evidence_sha256.localeCompare(b.evidence_sha256) || a.severity.localeCompare(b.severity));
-    const source_artifact_sha256 = sha256(canonical({ source_type, records: ordered.map(({ severity, evidence_sha256 }) => ({ severity, evidence_sha256 })) }));
-    return ordered.map(({ severity, evidence_sha256, source_locator, evidence_available = true }, source_position) => {
-      const source_key = sha256(canonical({ source_type, source_artifact_sha256, source_local_position: source_position }));
-      return { source_type, source_position, severity, evidence_sha256, source_artifact_sha256, source_key, source_locator, evidence_available };
-    });
-  }).sort((a, b) => a.source_key.localeCompare(b.source_key));
+  return { source: { source_type: "ci", records: ci }, malformed };
+}
+
+function candidatesForSource({ source_type, records }) {
+  const ordered = [...records].sort((a, b) => a.evidence_sha256.localeCompare(b.evidence_sha256) || a.severity.localeCompare(b.severity));
+  const digestRecords = ordered.map(({ severity, evidence_sha256 }) => ({ severity, evidence_sha256 }));
+  const source_artifact_sha256 = sha256(canonical({ source_type, records: digestRecords }));
+  return ordered.map(({ severity, evidence_sha256, source_locator, evidence_available = true }, source_position) => {
+    const source_key = sha256(canonical({ source_type, source_artifact_sha256, source_local_position: source_position }));
+    return { source_type, source_position, severity, evidence_sha256, source_artifact_sha256, source_key, source_locator, evidence_available };
+  });
+}
+
+function makeInventoryRecords(inputs) {
+  if (!inputs.checks?.checks?.length && (inputs.checks?.ciRed || inputs.checks?.ciPending)) {
+    throw new Error("plaintext CI evidence has no trustworthy candidate denominator");
+  }
+  const visibleChars = inputs.gptObservationVisibleChars ?? Number.POSITIVE_INFINITY;
+  const gptRecords = textFindingRecords(inputs.gptObservationMarkdown ?? inputs.gptMarkdown, "gpt")
+    .map((record) => ({ ...record, evidence_available: record.evidence_end_offset <= visibleChars }));
+  const gathered = [
+    { source: { source_type: "local-bugbot", records: textFindingRecords(inputs.localBugbotMarkdown) }, malformed: 0 },
+    { source: { source_type: "gpt", records: gptRecords }, malformed: 0 },
+    codeRabbitSource("coderabbit-issue", inputs.issueComments),
+    codeRabbitSource("coderabbit-inline", inputs.inlineComments),
+    codeRabbitSource("coderabbit-review", inputs.reviews),
+    ciSource(inputs.checks?.checks),
+  ];
+  const malformed = gathered.reduce((total, result) => total + result.malformed, 0);
+  const candidates = gathered.flatMap((result) => candidatesForSource(result.source))
+    .sort((a, b) => a.source_key.localeCompare(b.source_key));
   return { candidates, malformed };
 }
 
@@ -256,7 +254,8 @@ export function normalizeFindingInventory(inputs, { repoSlug, issue, pr, round =
     raw_candidates: candidates.length + malformed, malformed, candidates, codebase, issue_ref: issueRef, observed_at: at,
     run_id: sha256(canonical(runSeed)), program_id: sha256(canonical({ issue, codebase })),
     attribution_run_id: sha256(canonical({ issue, pr: Number(pr), round, head: head?.toLowerCase() ?? null, observed_at: at })), attempt: round,
-    allowed_codebases: [...new Set(Object.values(registry.codebase_mappings))].sort(),
+    allowed_codebases: [...new Set(Object.values(registry.codebase_mappings))]
+      .sort((left, right) => left.localeCompare(right)),
     pr: Number(pr),
   };
 }
@@ -287,44 +286,94 @@ export function buildFindingEnvelopePrompt(basePrompt, inventory) {
     `Opaque inventory: ${JSON.stringify(opaque)}\n`;
 }
 
-export function parseFindingEnvelope(output, inventory, registry) {
-  let envelope;
-  try { envelope = JSON.parse(String(output)); } catch { throw new Error("model response is not a strict JSON envelope"); }
-  exactKeys(envelope, new Set(["report_markdown", "decisions"]), "model envelope");
-  if (typeof envelope.report_markdown !== "string" || !Array.isArray(envelope.decisions)) throw new Error("invalid model envelope shape");
-  const expected = new Set(inventory.candidates.map((c) => c.source_key));
-  const registered = new Set(Object.values(registry.codebase_mappings));
-  const byKey = new Map();
-  for (const decision of envelope.decisions) {
-    exactKeys(decision, DECISION_KEYS, "decision");
-    if (!expected.has(decision.source_key)) throw new Error(`invented source key: ${decision.source_key}`);
-    if (byKey.has(decision.source_key)) throw new Error(`repeated source key: ${decision.source_key}`);
-    if (!OUTCOMES.has(decision.outcome)) throw new Error(`invalid outcome for ${decision.source_key}`);
-    if (!inventory.candidates.find((candidate) => candidate.source_key === decision.source_key).evidence_available && decision.outcome !== "incomplete") throw new Error(`decision claims unavailable evidence for ${decision.source_key}`);
-    if (!Array.isArray(decision.codebases) || !decision.codebases.length || decision.codebases.some((x) => !registered.has(x))) throw new Error(`unregistered codebase decision for ${decision.source_key}`);
-    const sortedCodebases = [...new Set(decision.codebases)].sort();
-    if (canonical(sortedCodebases) !== canonical(decision.codebases)) throw new Error(`codebases must be sorted and unique for ${decision.source_key}`);
-    if (!sortedCodebases.includes(inventory.codebase)) throw new Error(`decision omits source codebase for ${decision.source_key}`);
-    exactKeys(decision.taxonomy, TAXONOMY_KEYS, "taxonomy");
-    if (!TAXONOMY.severity.has(decision.taxonomy.severity) || !TAXONOMY.defect_class.has(decision.taxonomy.defect_class) || !TAXONOMY.determinism.has(decision.taxonomy.determinism)) throw new Error(`invalid taxonomy for ${decision.source_key}`);
-    const fences = decision.taxonomy.fences;
-    if (!Array.isArray(fences) || !fences.length || fences.some((x) => !TAXONOMY.fences.has(x)) || canonical([...new Set(fences)].sort()) !== canonical(fences) || (fences.length > 1 && (fences.includes("none") || fences.includes("unknown")))) throw new Error(`invalid taxonomy fences for ${decision.source_key}`);
-    if (!new Set(["complete", "incomplete", "unknown"]).has(decision.evidence_status)) throw new Error(`invalid evidence status for ${decision.source_key}`);
-    if (decision.outcome === "incomplete" ? decision.evidence_status === "complete" : decision.evidence_status !== "complete") throw new Error(`outcome/evidence mismatch for ${decision.source_key}`);
-    if (decision.outcome === "duplicate") {
-      if (!expected.has(decision.duplicate_target) || decision.duplicate_target === decision.source_key) throw new Error(`invalid duplicate target for ${decision.source_key}`);
-    } else if (decision.duplicate_target !== null) throw new Error(`unexpected duplicate target for ${decision.source_key}`);
-    byKey.set(decision.source_key, { ...decision, codebases: sortedCodebases });
+function validateDecisionCodebases(decision, registered, inventory) {
+  if (!Array.isArray(decision.codebases) || !decision.codebases.length
+    || decision.codebases.some((codebase) => !registered.has(codebase))) {
+    throw new Error(`unregistered codebase decision for ${decision.source_key}`);
   }
-  if (byKey.size !== expected.size) throw new Error("model decisions do not account for every source key");
+  const sortedCodebases = [...new Set(decision.codebases)]
+    .sort((left, right) => left.localeCompare(right));
+  if (canonical(sortedCodebases) !== canonical(decision.codebases)) {
+    throw new Error(`codebases must be sorted and unique for ${decision.source_key}`);
+  }
+  if (!sortedCodebases.includes(inventory.codebase)) {
+    throw new Error(`decision omits source codebase for ${decision.source_key}`);
+  }
+  return sortedCodebases;
+}
+
+function validateDecisionTaxonomy(decision) {
+  exactKeys(decision.taxonomy, TAXONOMY_KEYS, "taxonomy");
+  const taxonomy = decision.taxonomy;
+  if (!TAXONOMY.severity.has(taxonomy.severity) || !TAXONOMY.defect_class.has(taxonomy.defect_class)
+    || !TAXONOMY.determinism.has(taxonomy.determinism)) {
+    throw new Error(`invalid taxonomy for ${decision.source_key}`);
+  }
+  const fences = taxonomy.fences;
+  const ordered = Array.isArray(fences)
+    ? [...new Set(fences)].sort((left, right) => left.localeCompare(right))
+    : [];
+  const exclusiveFence = fences?.length > 1 && (fences.includes("none") || fences.includes("unknown"));
+  if (!fences?.length || fences.some((fence) => !TAXONOMY.fences.has(fence))
+    || canonical(ordered) !== canonical(fences) || exclusiveFence) {
+    throw new Error(`invalid taxonomy fences for ${decision.source_key}`);
+  }
+}
+
+function validateDecisionOutcome(decision, expected) {
+  if (!OUTCOMES.has(decision.outcome)) throw new Error(`invalid outcome for ${decision.source_key}`);
+  const evidenceStatuses = new Set(["complete", "incomplete", "unknown"]);
+  if (!evidenceStatuses.has(decision.evidence_status)) {
+    throw new Error(`invalid evidence status for ${decision.source_key}`);
+  }
+  const incomplete = decision.outcome === "incomplete";
+  if ((incomplete && decision.evidence_status === "complete") || (!incomplete && decision.evidence_status !== "complete")) {
+    throw new Error(`outcome/evidence mismatch for ${decision.source_key}`);
+  }
+  if (decision.outcome === "duplicate") {
+    if (!expected.has(decision.duplicate_target) || decision.duplicate_target === decision.source_key) {
+      throw new Error(`invalid duplicate target for ${decision.source_key}`);
+    }
+  } else if (decision.duplicate_target !== null) {
+    throw new Error(`unexpected duplicate target for ${decision.source_key}`);
+  }
+}
+
+function validateDecisionGraph(byKey, expected) {
   for (const start of expected) {
-    const seen = new Set([start]); let cursor = start;
+    const seen = new Set([start]);
+    let cursor = start;
     while (byKey.get(cursor)?.outcome === "duplicate") {
       cursor = byKey.get(cursor).duplicate_target;
       if (seen.has(cursor)) throw new Error("duplicate decisions contain a cycle");
       seen.add(cursor);
     }
   }
+}
+
+export function parseFindingEnvelope(output, inventory, registry) {
+  let envelope;
+  try { envelope = JSON.parse(String(output)); } catch { throw new Error("model response is not a strict JSON envelope"); }
+  exactKeys(envelope, new Set(["report_markdown", "decisions"]), "model envelope");
+  if (typeof envelope.report_markdown !== "string" || !Array.isArray(envelope.decisions)) throw new Error("invalid model envelope shape");
+  const expected = new Set(inventory.candidates.map((c) => c.source_key));
+  const candidates = new Map(inventory.candidates.map((candidate) => [candidate.source_key, candidate]));
+  const registered = new Set(Object.values(registry.codebase_mappings));
+  const byKey = new Map();
+  for (const decision of envelope.decisions) {
+    exactKeys(decision, DECISION_KEYS, "decision");
+    if (!expected.has(decision.source_key)) throw new Error(`invented source key: ${decision.source_key}`);
+    if (byKey.has(decision.source_key)) throw new Error(`repeated source key: ${decision.source_key}`);
+    if (!candidates.get(decision.source_key).evidence_available && decision.outcome !== "incomplete") {
+      throw new Error(`decision claims unavailable evidence for ${decision.source_key}`);
+    }
+    const sortedCodebases = validateDecisionCodebases(decision, registered, inventory);
+    validateDecisionTaxonomy(decision);
+    validateDecisionOutcome(decision, expected);
+    byKey.set(decision.source_key, { ...decision, codebases: sortedCodebases });
+  }
+  if (byKey.size !== expected.size) throw new Error("model decisions do not account for every source key");
+  validateDecisionGraph(byKey, expected);
   return { report_markdown: envelope.report_markdown, decisions: byKey };
 }
 
@@ -346,11 +395,19 @@ function candidateBase(inventory, source) {
   return { identity, candidate_id: domainHash(DOMAIN_CANDIDATE, identity) };
 }
 
+function dispositionForState(state) {
+  if (state === "duplicate") return "duplicate";
+  if (state === "rejected") return "rejected";
+  if (state === "incomplete") return "unknown";
+  return "open";
+}
+
 function eventRecord(inventory, source, base, state, sequence, predecessor, decision = null) {
   const codebases = decision?.codebases ?? [inventory.codebase];
   const taxonomy = decision?.taxonomy ?? { severity: source.severity, defect_class: "unknown", determinism: "unknown", fences: ["unknown"] };
-  const evidence = decision?.evidence_status ?? (state === "discovered" ? "complete" : "incomplete");
-  const disposition = state === "duplicate" ? "duplicate" : state === "rejected" ? "rejected" : state === "incomplete" ? "unknown" : "open";
+  let evidence = decision?.evidence_status;
+  if (!evidence) evidence = state === "discovered" ? "complete" : "incomplete";
+  const disposition = dispositionForState(state);
   const record = {
     ...common(inventory, evidence), record_type: "candidate", candidate_id: base.candidate_id,
     identity: base.identity, codebases, taxonomy, state, disposition, sequence,
@@ -401,71 +458,16 @@ export function projectUnknownSummary({ issue, pr, round = 1, observedAt, regist
   })];
 }
 
-function validCalendarTimestamp(value) {
-  const d = new Date(value);
-  return Number.isFinite(d.getTime()) && d.toISOString().replace(/\.000Z$/, "Z") === value;
-}
-
 export function validateFindingObservations(records, registry) {
-  const schemaBytes = readFileSync(SCHEMA_PATH);
-  const pin = readFileSync(PIN_PATH, "utf8").trim().split(/\s+/)[0];
-  if (pin !== SCHEMA_SHA256 || sha256(schemaBytes) !== pin) throw new Error("packaged finding schema hash mismatch");
-  const ajv = new Ajv2020({ allErrors: true, strict: true, formats: { "date-time": true } });
-  const validate = ajv.compile(JSON.parse(schemaBytes));
-  const candidates = new Map(); let summary = null; let provenance = null;
-  for (const record of records) {
-    if (!validate(record)) throw new Error(`finding observation schema error: ${ajv.errorsText(validate.errors)}`);
-    if (!validCalendarTimestamp(record.observed_at)) throw new Error("finding observation has invalid calendar timestamp");
-    const { event_id, ...withoutId } = record;
-    if (event_id !== domainHash(DOMAIN_EVENT, withoutId)) throw new Error("finding observation event_id mismatch");
-    if (record.producer.name !== registry.producer.name || !registry.producer.versions.includes(record.producer.version)) throw new Error("finding observation producer is untrusted");
-    if (record.attribution.issue && !registry.linear_teams.includes(record.attribution.issue.team)) throw new Error("finding observation team is untrusted");
-    const recordProvenance = canonical({ producer: record.producer, attribution: record.attribution });
-    if (provenance !== null && provenance !== recordProvenance) throw new Error("finding observation run provenance is inconsistent");
-    provenance = recordProvenance;
-    if (record.record_type === "run_summary") { if (summary && summary.event_id !== record.event_id) throw new Error("conflicting run summaries"); summary = record; continue; }
-    if (canonical([...record.codebases].sort()) !== canonical(record.codebases) || record.codebases.some((x) => !Object.values(registry.codebase_mappings).includes(x))) throw new Error("finding observation codebase is untrusted or unsorted");
-    if (record.candidate_id !== domainHash(DOMAIN_CANDIDATE, record.identity)) throw new Error("finding observation candidate_id mismatch");
-    if (record.identity.producer_namespace !== record.producer.name || record.identity.original_run_id !== record.producer.run_id) throw new Error("finding discovery provenance is inconsistent");
-    const expectedDisposition = record.state === "duplicate" ? "duplicate" : record.state === "rejected" ? "rejected" : record.state === "resolved" ? "resolved" : record.state === "incomplete" ? "unknown" : "open";
-    if (record.disposition !== expectedDisposition) throw new Error("finding disposition does not match state");
-    if (record.state === "incomplete" ? record.evidence_status === "complete" : record.sequence > 0 && record.evidence_status !== "complete") throw new Error("finding evidence does not match lifecycle state");
-    if (record.links.pull_request && (!record.codebases.includes(record.links.pull_request.codebase))) throw new Error("finding pull request is outside codebase membership");
-    if (record.duplicate_target !== null && record.state !== "duplicate") throw new Error("duplicate target exists outside duplicate state");
-    const fences = record.taxonomy.fences;
-    if (canonical([...new Set(fences)].sort()) !== canonical(fences) || (fences.length > 1 && (fences.includes("none") || fences.includes("unknown")))) throw new Error("finding taxonomy fences are invalid");
-    const list = candidates.get(record.candidate_id) ?? []; list.push(record); candidates.set(record.candidate_id, list);
-  }
-  if (!summary) throw new Error("finding observation summary is required");
-  for (const list of candidates.values()) {
-    list.sort((a, b) => a.sequence - b.sequence);
-    if (list[0].sequence !== 0 || list[0].state !== "discovered" || list[0].predecessor_event_id !== null) throw new Error("invalid discovery lifecycle");
-    for (let i = 1; i < list.length; i++) {
-      if (list[i].sequence !== i || list[i].predecessor_event_id !== list[i - 1].event_id || canonical(list[i].identity) !== canonical(list[0].identity)) throw new Error("invalid finding lifecycle chain");
-      if (!TRANSITIONS.get(list[i - 1].state)?.has(list[i].state)) throw new Error(`illegal finding transition: ${list[i - 1].state} -> ${list[i].state}`);
-      const expectedEpisode = list[i].state === "reopened" ? list[i - 1].episode + 1 : list[i - 1].episode;
-      if (list[i].episode !== expectedEpisode) throw new Error("invalid finding lifecycle episode");
-    }
-    const duplicate = list.find((x) => x.state === "duplicate");
-    if (duplicate && (!candidates.has(duplicate.duplicate_target) || duplicate.duplicate_target === duplicate.candidate_id)) throw new Error("duplicate target is unknown or self-referential");
-  }
-  for (const start of candidates.keys()) {
-    const seen = new Set([start]); let cursor = start;
-    for (;;) {
-      const edge = candidates.get(cursor)?.find((x) => x.state === "duplicate")?.duplicate_target;
-      if (!edge) break;
-      if (seen.has(edge)) throw new Error("finding duplicate graph contains a cycle");
-      seen.add(edge); cursor = edge;
-    }
-  }
-  if (summary.capture_status !== "unknown") {
-    const c = summary.counts;
-    const terminal = [...candidates.values()].filter((list) => TERMINAL.get(summary.stage).has(list.at(-1).state)).length;
-    if (c.raw_candidates !== c.terminal_stage + c.incomplete || c.raw_candidates - c.emitted_candidates !== c.malformed || c.incomplete !== c.emitted_candidates - c.terminal_stage + c.malformed || c.emitted_candidates !== candidates.size || c.terminal_stage !== terminal || summary.emission_gap_reason !== (c.malformed ? "malformed" : "none")) throw new Error("finding observation summary reconciliation failed");
-  } else if (summary.detector_completed !== null || summary.detector_evidence_sha256 !== null || Object.values(summary.counts).some((x) => x !== null) || summary.emission_gap_reason !== "unknown") {
-    throw new Error("unknown capture must not claim a denominator");
-  }
-  return true;
+  return validateFindingLedger(records, registry, {
+    canonical,
+    sha256,
+    schemaPath: SCHEMA_PATH,
+    pinPath: PIN_PATH,
+    schemaSha256: SCHEMA_SHA256,
+    eventId: findingEventId,
+    candidateId: (identity) => domainHash(DOMAIN_CANDIDATE, identity),
+  });
 }
 
 export function writeFindingObservations(outputPath, records, registry, { nowMs = Date.now() } = {}) {

@@ -576,7 +576,8 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
     }
   }
   const finish = (code) => { findingSession?.close(); return code; };
-  const plannedOutPath = opts.out ? path.resolve(opts.out) : defaultOutPath(repo, opts.issue, round);
+  const reportOutPath = opts.out ? path.resolve(opts.out) : defaultOutPath(repo, opts.issue, round);
+  const plannedOutPath = path.resolve(reportOutPath);
   const observationPath = findingSession ? path.resolve(opts.findingObservations) : null;
   const reservedObservationPath = observationPath && (
     plannedOutPath === observationPath || plannedOutPath === `${observationPath}.lock` ||
@@ -746,7 +747,7 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
   const finalText = finalizeOutput(validated.text, verdict);
 
   // Write the artifact (gitignored; never committed). --out overrides the default path.
-  const outPath = plannedOutPath;
+  const outPath = reportOutPath;
   try {
     mkdirSync(path.dirname(outPath), { recursive: true });
     writeFileSync(outPath, finalText);

@@ -16,7 +16,7 @@ export function extractFindingSeverityRecords(text, { dialect = "canonical" } = 
   for (const [lineIndex, line] of String(text ?? "").split("\n").entries()) {
     let candidate = line;
     if (dialect === "gpt") {
-      const match = line.match(GPT_RECORD);
+      const match = GPT_RECORD.exec(line);
       if (!match) continue;
       candidate = `- ${match[1]}: finding`;
     }

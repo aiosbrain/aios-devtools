@@ -13,13 +13,14 @@ export function buildConsolidatePrompt(reviewerPrompt, inputs = {}) {
     gptMarkdown,
   } = inputs;
   const asJson = (v) => JSON.stringify(v ?? [], null, 2);
-  const checkLines = checks?.checks?.length
-    ? checks.checks
-        .map((x) => `[${x.bucket || x.state || x.conclusion || "?"}] ${x.name}`)
-        .join("\n")
-    : checks?.ciRed
-      ? "(CI is red — see the raw board)"
-      : "(no CI check data)";
+  let checkLines = "(no CI check data)";
+  if (checks?.checks?.length) {
+    checkLines = checks.checks
+      .map((x) => `[${x.bucket || x.state || x.conclusion || "?"}] ${x.name}`)
+      .join("\n");
+  } else if (checks?.ciRed) {
+    checkLines = "(CI is red — see the raw board)";
+  }
   return [
     reviewerPrompt.trim(),
     "",

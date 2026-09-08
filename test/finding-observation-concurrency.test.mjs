@@ -21,6 +21,30 @@ test("CI candidate identities follow checks across source reordering", () => {
     const unsafe = make([{ name, state: "FAILURE", bucket: "fail", conclusion: "" }]);
     assert.equal(unsafe.candidates.length, 0); assert.equal(unsafe.malformed, 1);
   }
+  assert.equal(make([null]).malformed, 1);
+});
+
+test("CodeRabbit paths disambiguate otherwise identical structural records", () => {
+  const options = { repoSlug: "aiosbrain/aios-devtools", issue: "AIO-1100", pr: 44, round: 1,
+    observedAt: "2026-09-08T00:00:00Z", registry: loadFindingRegistry() };
+  const inputs = { localBugbotMarkdown: "BUGBOT_CLEAR", checks: { checks: [] }, inlineComments: [
+    { path: "src/a.mjs", line: 10, body: "**Major:** finding" },
+    { path: "src/b.mjs", line: 10, body: "**Major:** finding" }] };
+  const forward = normalizeFindingInventory(inputs, options);
+  const reverse = normalizeFindingInventory({ ...inputs, inlineComments: [...inputs.inlineComments].reverse() }, options);
+  assert.equal(new Set(forward.candidates.map((candidate) => candidate.source_key)).size, 2);
+  assert.deepEqual(forward.candidates.map((candidate) => candidate.source_key), reverse.candidates.map((candidate) => candidate.source_key));
+});
+
+test("relative repo default report path collides with the absolute observation path", async () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "finding-relative-")); const previous = process.cwd();
+  const review = path.join(repo, "review.md"); writeFileSync(review, "BUGBOT_CLEAR\n"); process.chdir(repo);
+  try {
+    const output = path.resolve(".aios/loop/AIO-1100/findings-r1.md"); let called = false;
+    const code = await cmdConsolidateFindings(".", ["--pr", "44", "--issue", "AIO-1100", "--repo", "aiosbrain/aios-devtools",
+      "--local-bugbot-review", review, "--finding-observations", output], { callAgent: async () => { called = true; } });
+    assert.equal(code, 1); assert.equal(called, false);
+  } finally { process.chdir(previous); }
 });
 
 test("a stale recovery guard is claimed without replacing a newer owner", () => {
