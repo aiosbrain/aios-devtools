@@ -19,3 +19,15 @@ export function checkIsPending(check) {
     || PENDING_STATES.has(check.state)
     || PENDING_STATES.has(check.conclusion);
 }
+
+export function sanitizedCheckIdentity(check) {
+  const allowed = new Set(["name", "state", "bucket", "conclusion"]);
+  if (!check || typeof check !== "object" || Array.isArray(check)
+    || Object.keys(check).some((key) => !allowed.has(key))) throw new Error("unsafe CI check fields");
+  if (typeof check.name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9 ._:/()@+,#\[\]-]{0,199}$/.test(check.name)) {
+    throw new Error("unsafe CI check name");
+  }
+  if (!/^[A-Z_]{0,32}$/.test(check.state ?? "") || !/^[a-z_]{0,32}$/.test(check.bucket ?? "")
+    || !/^[A-Z_]{0,32}$/.test(check.conclusion ?? "")) throw new Error("unsafe CI check state");
+  return { name: check.name, state: check.state ?? "", bucket: check.bucket ?? "", conclusion: check.conclusion ?? "" };
+}

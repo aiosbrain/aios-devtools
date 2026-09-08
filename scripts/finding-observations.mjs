@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import { extractFindingSeverityRecords } from "./finding-severity-records.mjs";
-import { checkIsPending, checkIsRed } from "./ci-status.mjs";
+import { checkIsPending, checkIsRed, sanitizedCheckIdentity } from "./ci-status.mjs";
 import { acquireAtomicJsonlLease, releaseAtomicJsonlLease, writeAtomicJsonl } from "./atomic-jsonl.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONTRACTS = path.join(HERE, "..", "contracts");
@@ -198,11 +198,13 @@ function makeInventoryRecords(inputs) {
   }
   const ci = [];
   for (const [item, check] of (inputs.checks?.checks ?? []).entries()) {
-    if (checkIsRed(check)) {
-      ci.push({ severity: "high", evidence_sha256: sha256(canonical({ classification: "red" })), source_locator: { kind: "check", item } });
-    } else if (checkIsPending(check)) {
-      ci.push({ severity: "unknown", evidence_sha256: sha256(canonical({ classification: "pending" })), source_locator: { kind: "check", item } });
-    }
+    const classification = checkIsRed(check) ? "red" : checkIsPending(check) ? "pending" : null;
+    if (!classification) continue;
+    try {
+      const check_identity_sha256 = sha256(canonical(sanitizedCheckIdentity(check)));
+      ci.push({ severity: classification === "red" ? "high" : "unknown",
+        evidence_sha256: sha256(canonical({ classification, check_identity_sha256 })), source_locator: { kind: "check", item } });
+    } catch { malformed++; }
   }
   sources.push({ source_type: "ci", records: ci });
   const candidates = sources.flatMap(({ source_type, records }) => {

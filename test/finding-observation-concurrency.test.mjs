@@ -5,6 +5,19 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { cmdConsolidateFindings } from "../scripts/consolidate-findings.mjs";
 import { acquireAtomicJsonlLease, releaseAtomicJsonlLease } from "../scripts/atomic-jsonl.mjs";
+import { loadFindingRegistry, normalizeFindingInventory } from "../scripts/finding-observations.mjs";
+
+test("CI candidate identities follow checks across source reordering", () => {
+  const checks = [{ name: "unit tests", state: "FAILURE", bucket: "fail", conclusion: "" },
+    { name: "integration tests", state: "CANCELLED", bucket: "cancel", conclusion: "" }];
+  const options = { repoSlug: "aiosbrain/aios-devtools", issue: "AIO-1100", pr: 44, round: 1,
+    observedAt: "2026-09-08T00:00:00Z", registry: loadFindingRegistry() };
+  const make = (ordered) => normalizeFindingInventory({ localBugbotMarkdown: "BUGBOT_CLEAR", checks: { checks: ordered },
+    latestCommit: { sha: "a".repeat(40), committed_at: options.observedAt } }, options);
+  const keyed = (inventory, ordered) => Object.fromEntries(inventory.candidates.map((candidate) =>
+    [ordered[candidate.source_locator.item].name, candidate.source_key]));
+  assert.deepEqual(keyed(make(checks), checks), keyed(make([...checks].reverse()), [...checks].reverse()));
+});
 
 test("a stale recovery guard is claimed without replacing a newer owner", () => {
   const repo = mkdtempSync(path.join(tmpdir(), "finding-stale-"));
