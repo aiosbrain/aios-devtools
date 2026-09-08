@@ -115,7 +115,7 @@ function codeRabbitItemIdentity(value) {
     if (typeof value.path !== "string" || value.path.length > 500 || value.path.startsWith("/") || /(^|\/)\.\.(\/|$)|[\u0000-\u001f]/.test(value.path)) throw new Error("unsafe CodeRabbit path");
     identity.path = value.path;
   }
-  if (value.line !== undefined) {
+  if (value.line !== undefined && value.line !== null) {
     if (!Number.isInteger(value.line) || value.line < 1) throw new Error("unsafe CodeRabbit line");
     identity.line = value.line;
   }
@@ -153,11 +153,11 @@ function codeRabbitRecords(body, item, itemIdentity) {
   const potentialLines = lines.flatMap((line, index) => /potential issue/i.test(line) ? [{ line: index + 1, text: line }] : []);
   for (const [index, potential] of potentialLines.entries()) {
     if (found.some((record) => record.line === potential.line)) continue;
-    const token = potential.text.match(/(major|minor|nitpick)/i)?.[1]?.toLowerCase();
+    const token = potential.text.match(/(critical|blocker|major|minor|nitpick)/i)?.[1]?.toLowerCase();
     const next = potentialLines[index + 1]?.line ?? lines.length + 1;
     const hasFollowingLabel = found.some((record) => record.line > potential.line && record.line < next);
     if (hasFollowingLabel) continue;
-    found.push({ line: potential.line, severity: token === "minor" ? "medium" : token === "nitpick" ? "low" : "high" });
+    found.push({ line: potential.line, severity: ["critical", "blocker"].includes(token) ? "critical" : token === "minor" ? "medium" : token === "nitpick" ? "low" : "high" });
   }
   found.sort((a, b) => a.line - b.line);
   if (found.length) return found.map(({ line, severity }, index) => ({

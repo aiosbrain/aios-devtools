@@ -114,6 +114,16 @@ test("finding identity covers legacy heading bodies and mixed CodeRabbit dialect
     issueComments: [{ body: "_⚠️ Potential issue_ | _🟠 Major_\n\n**Major:** Null input crashes." }],
   }, opts);
   assert.deepEqual(badgedLabel.candidates.map((x) => x.severity), ["high"]);
+  const fileLevel = normalizeFindingInventory({
+    ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null, checks: { checks: [] }, issueComments: [],
+    inlineComments: [{ path: "src/a.mjs", line: null, body: "**Major:** first defect\n\n**Minor:** second defect" }],
+  }, opts);
+  assert.deepEqual(fileLevel.candidates.map((x) => x.severity).sort(), ["high", "medium"]);
+  const criticalBadge = normalizeFindingInventory({
+    ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null, checks: { checks: [] }, issueComments: [],
+    inlineComments: [{ path: "src/a.mjs", line: 5, body: "_⚠️ Potential issue_ | _🔴 Critical_\n\n**Credentials leak.**" }],
+  }, opts);
+  assert.deepEqual(criticalBadge.candidates.map((x) => x.severity), ["critical"]);
   const bundled = normalizeFindingInventory({
     ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null, checks: { checks: [] }, issueComments: [],
     reviews: [{ body: "_⚠️ Potential issue_ | _🟠 Major_\n\n**Null input crashes.**\n\n_⚠️ Potential issue_ | _🟡 Minor_\n\n**Fallback is incorrect.**" }],
