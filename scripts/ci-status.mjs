@@ -7,10 +7,10 @@ const RED_STATES = new Set([
 const PENDING_STATES = new Set([
   "PENDING", "IN_PROGRESS", "QUEUED", "REQUESTED", "WAITING", "EXPECTED",
 ]);
-const SAFE_CHECK_PUNCTUATION = new Set([..." ._:/()@+,#[]-"]);
+const SAFE_CHECK_PUNCTUATION = new Set(" ._:/()@+,#[]-");
 
 function isAsciiAlphaNumeric(character) {
-  const code = character.charCodeAt(0);
+  const code = character.codePointAt(0);
   return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
 }
 

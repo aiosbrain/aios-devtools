@@ -12,7 +12,7 @@ function severityForToken(token, fallback = null) {
 
 function structuredRecords(text) {
   const records = [];
-  const pattern = /\*\*([A-Za-z]+)(?: severity)?(?::\*\*|\*\*\s*:)/gi;
+  const pattern = /\*\*([A-Z]+)(?: severity)?(?::\*\*|\*\*\s*:)/gi;
   for (const match of text.matchAll(pattern)) {
     const severity = severityForToken(match[1]);
     if (severity) records.push({ severity, line: text.slice(0, match.index).split("\n").length });
@@ -21,7 +21,7 @@ function structuredRecords(text) {
 }
 
 function legacySeverity(lineText) {
-  if (/^\s*_[^A-Za-z0-9]*nitpick_\s*$/i.test(lineText)) return "low";
+  if (/^\s*_[^A-Z0-9]*nitpick_\s*$/i.test(lineText)) return "low";
   let label = lineText.trim().replace(/^(?:[-*]\s+)/, "").replace(/^(?:\*\*|__)/, "");
   const token = /^(major|minor|nitpick)/i.exec(label)?.[1];
   if (!token) return null;
