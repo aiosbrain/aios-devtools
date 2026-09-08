@@ -576,8 +576,13 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
     }
   }
   const plannedOutPath = opts.out ? path.resolve(opts.out) : defaultOutPath(repo, opts.issue, round);
-  if (findingSession && path.resolve(opts.findingObservations) === plannedOutPath) {
-    console.error(c.red("error: --out and --finding-observations must use different paths."));
+  const observationPath = findingSession ? path.resolve(opts.findingObservations) : null;
+  const reservedObservationPath = observationPath && (
+    plannedOutPath === observationPath || plannedOutPath === `${observationPath}.lock` ||
+    plannedOutPath.startsWith(`${observationPath}.lock.`) || plannedOutPath.startsWith(`${observationPath}.tmp-`)
+  );
+  if (reservedObservationPath) {
+    console.error(c.red("error: --out must not use the finding-observations path or its reserved writer paths."));
     return 1;
   }
   const reportObservationError = (error) => {

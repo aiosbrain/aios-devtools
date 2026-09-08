@@ -103,7 +103,7 @@ function textFindingRecords(text, dialect = "canonical") {
   const found = extractFindingSeverityRecords(text, { dialect });
   return found.map(({ line, severity }, index) => ({
     severity: severity.toLowerCase(),
-    evidence_sha256: sha256(lines.slice(line - 1, (found[index + 1]?.line ?? lines.length + 1) - 1).join("\n")),
+    evidence_sha256: sha256(canonical({ kind: "text-finding", line, severity: severity.toLowerCase() })),
     evidence_end_offset: found[index + 1] ? starts[found[index + 1].line - 1] : source.length,
     source_locator: { kind: "line", line },
   }));
@@ -125,7 +125,7 @@ function codeRabbitItemIdentity(value) {
       identity[key] = value[key];
     }
   }
-  return sha256(canonical(identity));
+  return sha256(canonical({ fields: Object.keys(identity).sort() }));
 }
 
 function codeRabbitRecords(body, item, itemIdentity) {
@@ -161,13 +161,13 @@ function codeRabbitRecords(body, item, itemIdentity) {
     found.push({ line: potential.line, severity: badgeSeverity });
   }
   found.sort((a, b) => a.line - b.line);
-  if (found.length) return found.map(({ line, severity }, index) => ({
+  if (found.length) return found.map(({ line, severity }) => ({
     severity,
-    evidence_sha256: sha256(canonical({ item: itemIdentity, evidence: lines.slice(line - 1, (found[index + 1]?.line ?? lines.length + 1) - 1).join("\n") })),
+    evidence_sha256: sha256(canonical({ item: itemIdentity, line, severity })),
     source_locator: { kind: "item-line", item, line },
   }));
   return /severity/i.test(text)
-    ? [{ severity: "unknown", evidence_sha256: sha256(canonical({ item: itemIdentity, evidence: text })), source_locator: { kind: "item-line", item, line: 1 } }]
+    ? [{ severity: "unknown", evidence_sha256: sha256(canonical({ item: itemIdentity, line: 1, severity: "unknown" })), source_locator: { kind: "item-line", item, line: 1 } }]
     : [];
 }
 
@@ -195,9 +195,9 @@ function makeInventoryRecords(inputs) {
   const ci = [];
   for (const [item, check] of (inputs.checks?.checks ?? []).entries()) {
     if (checkIsRed(check)) {
-      ci.push({ severity: "high", evidence_sha256: sha256(canonical(check)), source_locator: { kind: "check", item } });
+      ci.push({ severity: "high", evidence_sha256: sha256(canonical({ classification: "red" })), source_locator: { kind: "check", item } });
     } else if (checkIsPending(check)) {
-      ci.push({ severity: "unknown", evidence_sha256: sha256(canonical(check)), source_locator: { kind: "check", item } });
+      ci.push({ severity: "unknown", evidence_sha256: sha256(canonical({ classification: "pending" })), source_locator: { kind: "check", item } });
     }
   }
   sources.push({ source_type: "ci", records: ci });
@@ -242,12 +242,14 @@ export function normalizeFindingInventory(inputs, { repoSlug, issue, pr, round =
   const detector_evidence_sha256 = sha256(canonical(detector));
   const at = observedAt ?? inputs.latestCommit?.committed_at;
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(at ?? "")) throw new Error("inventory observation time is unavailable");
-  const runSeed = { issue, pr: Number(pr), round, head: inputs.latestCommit?.sha ?? null, detector_evidence_sha256, observed_at: at };
+  const head = inputs.latestCommit?.sha ?? null;
+  if (head !== null && !/^[0-9a-f]{40}$/i.test(head)) throw new Error("inventory head revision is invalid");
+  const runSeed = { issue, pr: Number(pr), round, head: head?.toLowerCase() ?? null, detector_evidence_sha256, observed_at: at };
   return {
     capture_status: "complete", detector_completed: true, detector_evidence_sha256,
     raw_candidates: candidates.length + malformed, malformed, candidates, codebase, issue_ref: issueRef, observed_at: at,
     run_id: sha256(canonical(runSeed)), program_id: sha256(canonical({ issue, codebase })),
-    attribution_run_id: sha256(canonical({ issue, pr: Number(pr), round, head: inputs.latestCommit?.sha ?? null, observed_at: at })), attempt: round,
+    attribution_run_id: sha256(canonical({ issue, pr: Number(pr), round, head: head?.toLowerCase() ?? null, observed_at: at })), attempt: round,
     allowed_codebases: [...new Set(Object.values(registry.codebase_mappings))].sort(),
     pr: Number(pr),
   };

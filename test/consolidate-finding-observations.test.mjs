@@ -85,12 +85,12 @@ test("splits bundled CodeRabbit findings and accepts legacy Bugbot severity head
   assert.deepEqual(inventory.candidates.map((x) => x.severity).sort(), ["high", "high", "medium"]);
 });
 
-test("finding identity covers legacy heading bodies and mixed CodeRabbit dialects", () => {
+test("finding identity excludes legacy prose and covers mixed CodeRabbit dialects", () => {
   const legacy = (body) => normalizeFindingInventory({
     ...BASE_INPUTS, localBugbotMarkdown: `**High Severity**\n\n${body}\n`,
     gptMarkdown: null, issueComments: [], checks: { checks: [] },
   }, opts);
-  assert.notEqual(legacy("Retry loops forever.").candidates[0].source_key, legacy("Credentials are exposed.").candidates[0].source_key);
+  assert.equal(legacy("Retry loops forever.").candidates[0].source_key, legacy("private_email=synthetic@example.invalid").candidates[0].source_key);
   const mixed = normalizeFindingInventory({
     ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null,
     issueComments: [{ body: "**Major:** first defect\n\n[Low] README.md:1 — second defect" }], checks: { checks: [] },
@@ -208,8 +208,8 @@ test("inventory uses the canonical severity records for compact bullets, heading
   assert.deepEqual(extractFindingSeverityRecords(compact).map((x) => x.severity), ["Critical"]);
   const compactInventory = normalizeFindingInventory({ ...BASE_INPUTS, localBugbotMarkdown: compact, gptMarkdown: null, issueComments: [], checks: { checks: [] } }, opts);
   assert.deepEqual(compactInventory.candidates.map((x) => x.severity), ["critical"]);
-  const changedInventory = normalizeFindingInventory({ ...BASE_INPUTS, localBugbotMarkdown: "- Critical: scripts/x.mjs:12 — different defect", gptMarkdown: null, issueComments: [], checks: { checks: [] } }, opts);
-  assert.notEqual(changedInventory.candidates[0].source_key, compactInventory.candidates[0].source_key);
+  const privateVariant = normalizeFindingInventory({ ...BASE_INPUTS, localBugbotMarkdown: "-Critical: private_email=synthetic@example.invalid", gptMarkdown: null, issueComments: [], checks: { checks: [] } }, opts);
+  assert.equal(privateVariant.candidates[0].source_key, compactInventory.candidates[0].source_key);
 
   const heading = "### [High] scripts/x.mjs:12 — not a canonical finding";
   assert.equal(hasCriticalOrHighFindings(heading), false);
@@ -482,7 +482,7 @@ test("prompt failure writes unknown while colliding report and JSONL paths are r
   const baseArgs = ["--pr", "44", "--issue", "AIO-1100", "--repo", "aiosbrain/aios-devtools", "--local-bugbot-review", review, "--finding-observations", out];
   assert.equal(await cmdConsolidateFindings(repo, baseArgs, { readReviewerPrompt: () => { throw new Error("missing prompt"); }, now: () => "2026-09-08T00:00:00Z" }), 1);
   assert.equal(JSON.parse(readFileSync(out, "utf8")).capture_status, "unknown");
-  const collision = path.join(repo, "collision"); assert.equal(await cmdConsolidateFindings(repo, [...baseArgs.slice(0, -1), collision, "--out", collision], {}), 1); assert.equal(existsSync(collision), false);
+  const collision = path.join(repo, "collision"); for (const target of [collision, `${collision}.lock`]) { assert.equal(await cmdConsolidateFindings(repo, [...baseArgs.slice(0, -1), collision, "--out", target], {}), 1); assert.equal(existsSync(target), false); }
 });
 test("legacy path never evaluates observation-only clock dependency", async () => {
   const repo = mkdtempSync(path.join(tmpdir(), "finding-legacy-clock-"));
