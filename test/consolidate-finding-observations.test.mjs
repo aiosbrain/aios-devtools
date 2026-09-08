@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -374,18 +374,20 @@ test("writer is atomic, mode 0600, and refuses live or young locks", () => {
   writeFindingObservations(out, records, registry);
   assert.equal(statSync(out).mode & 0o777, 0o600);
   assert.equal(readFileSync(out, "utf8").endsWith("\n"), true);
-  writeFileSync(`${out}.lock`, JSON.stringify({ pid: process.pid, created_at_ms: 0 }));
-  assert.throws(() => writeFindingObservations(out, records, registry), /locked/);
+  writeFileSync(`${out}.lock`, JSON.stringify({ pid: process.pid, created_at_ms: 0, nonce: "live" }));
+  assert.throws(() => writeFindingObservations(out, records, registry), /locked|invalid/);
   const old = Date.now() - 16 * 60 * 1000;
-  writeFileSync(`${out}.lock`, JSON.stringify({ pid: 2147483647, created_at_ms: old }));
+  writeFileSync(`${out}.lock`, JSON.stringify({ pid: 2147483647, created_at_ms: old, nonce: "old" }));
   assert.throws(() => writeFindingObservations(out, records, registry), /locked/);
   utimesSync(`${out}.lock`, new Date(old), new Date(old));
   chmodSync(`${out}.lock`, 0o600);
   writeFindingObservations(out, records, registry);
-  writeFileSync(`${out}.lock`, JSON.stringify({ pid: 2147483647, created_at_ms: old }));
-  writeFileSync(`${out}.lock.recovery`, "recovery in progress\n");
+  writeFileSync(`${out}.lock`, JSON.stringify({ pid: 2147483647, created_at_ms: old, nonce: "orphan" }));
+  writeFileSync(`${out}.lock.recovery-orphan`, "recovery in progress\n");
   utimesSync(`${out}.lock`, new Date(old), new Date(old));
-  assert.throws(() => writeFindingObservations(out, records, registry), /locked/);
+  assert.throws(() => writeFindingObservations(out, records, registry), /locked|invalid/);
+  utimesSync(`${out}.lock.recovery-orphan`, new Date(old), new Date(old));
+  writeFindingObservations(out, records, registry);
 });
 
 test("structured prompt contains opaque keys but not source prose", () => {
@@ -474,6 +476,14 @@ test("pre-inventory gather failure writes an unknown summary and keeps exit 1", 
   assert.equal(summary.capture_status, "unknown"); assert.equal(summary.counts.raw_candidates, null);
 });
 
+test("prompt failure writes unknown while colliding report and JSONL paths are rejected", async () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "finding-preflight-")); const review = path.join(repo, "bugbot.md");
+  writeFileSync(review, "BUGBOT_CLEAR\n"); const out = path.join(repo, "observations.jsonl");
+  const baseArgs = ["--pr", "44", "--issue", "AIO-1100", "--repo", "aiosbrain/aios-devtools", "--local-bugbot-review", review, "--finding-observations", out];
+  assert.equal(await cmdConsolidateFindings(repo, baseArgs, { readReviewerPrompt: () => { throw new Error("missing prompt"); }, now: () => "2026-09-08T00:00:00Z" }), 1);
+  assert.equal(JSON.parse(readFileSync(out, "utf8")).capture_status, "unknown");
+  const collision = path.join(repo, "collision"); assert.equal(await cmdConsolidateFindings(repo, [...baseArgs.slice(0, -1), collision, "--out", collision], {}), 1); assert.equal(existsSync(collision), false);
+});
 test("legacy path never evaluates observation-only clock dependency", async () => {
   const repo = mkdtempSync(path.join(tmpdir(), "finding-legacy-clock-"));
   const review = path.join(repo, "bugbot.md"); writeFileSync(review, "BUGBOT_CLEAR\n");

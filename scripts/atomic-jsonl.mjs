@@ -12,36 +12,56 @@ function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (error) { return error.code !== "ESRCH"; }
 }
 
+function lockState(lockPath, nowMs, { allowInvalid = false } = {}) {
+  let lock;
+  try { lock = JSON.parse(readFileSync(lockPath, "utf8")); }
+  catch {
+    const modifiedAt = statSync(lockPath).mtimeMs;
+    if (allowInvalid && Number.isFinite(modifiedAt) && nowMs - modifiedAt > STALE_MS) return { stale: true, lock: null };
+    throw new Error(`finding observation lock is invalid: ${lockPath}`);
+  }
+  const createdAt = Number(lock.created_at_ms); const modifiedAt = statSync(lockPath).mtimeMs;
+  if (!Number.isFinite(createdAt) || !Number.isFinite(modifiedAt)) throw new Error(`finding observation lock is invalid: ${lockPath}`);
+  return { lock, stale: nowMs - Math.max(createdAt, modifiedAt) > STALE_MS && !pidAlive(Number(lock.pid)) };
+}
+
+function createLock(lockPath, nowMs) {
+  const nonce = randomUUID();
+  const fd = openSync(lockPath, "wx", 0o600);
+  writeFileSync(fd, `${JSON.stringify({ pid: process.pid, created_at_ms: nowMs, nonce })}\n`); closeSync(fd);
+  return nonce;
+}
+
 function replaceStaleLock(lockPath, nowMs) {
-  const recovery = `${lockPath}.recovery`;
+  const initial = lockState(lockPath, nowMs);
+  if (!initial.stale) throw new Error(`finding observation output is locked: ${lockPath}`);
+  const nonce = typeof initial.lock?.nonce === "string" ? initial.lock.nonce : "legacy";
+  const recovery = `${lockPath}.recovery-${nonce}`;
   let guard;
-  try { guard = openSync(recovery, "wx", 0o600); }
+  try { guard = createLock(recovery, nowMs); }
   catch (error) {
-    if (error.code === "EEXIST") throw new Error(`finding observation output is locked: ${lockPath}`);
-    throw error;
+    if (error.code !== "EEXIST") throw error;
+    if (!lockState(recovery, nowMs, { allowInvalid: true }).stale) throw new Error(`finding observation output is locked: ${lockPath}`);
+    unlinkSync(recovery);
+    try { guard = createLock(recovery, nowMs); }
+    catch { throw new Error(`finding observation output is locked: ${lockPath}`); }
   }
   try {
-    let lock;
-    try { lock = JSON.parse(readFileSync(lockPath, "utf8")); }
-    catch { throw new Error(`finding observation lock is invalid: ${lockPath}`); }
-    const createdAt = Number(lock.created_at_ms); const modifiedAt = statSync(lockPath).mtimeMs;
-    if (!Number.isFinite(createdAt) || !Number.isFinite(modifiedAt)) throw new Error(`finding observation lock is invalid: ${lockPath}`);
-    if (nowMs - Math.max(createdAt, modifiedAt) <= STALE_MS || pidAlive(Number(lock.pid))) {
+    const current = lockState(lockPath, nowMs);
+    if (!current.stale || (initial.lock?.nonce !== undefined && current.lock?.nonce !== initial.lock.nonce)) {
       throw new Error(`finding observation output is locked: ${lockPath}`);
     }
     unlinkSync(lockPath);
-    const fd = openSync(lockPath, "wx", 0o600);
-    writeFileSync(fd, `${JSON.stringify({ pid: process.pid, created_at_ms: nowMs })}\n`); closeSync(fd);
+    createLock(lockPath, nowMs);
   } finally {
-    if (guard !== undefined) closeSync(guard);
+    void guard;
     if (existsSync(recovery)) unlinkSync(recovery);
   }
 }
 
 function acquireLock(lockPath, nowMs) {
   try {
-    const fd = openSync(lockPath, "wx", 0o600);
-    writeFileSync(fd, `${JSON.stringify({ pid: process.pid, created_at_ms: nowMs })}\n`); closeSync(fd);
+    createLock(lockPath, nowMs);
   } catch (error) {
     if (error.code !== "EEXIST") throw error;
     replaceStaleLock(lockPath, nowMs);

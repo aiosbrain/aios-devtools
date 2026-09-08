@@ -575,6 +575,11 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
       return 1;
     }
   }
+  const plannedOutPath = opts.out ? path.resolve(opts.out) : defaultOutPath(repo, opts.issue, round);
+  if (findingSession && path.resolve(opts.findingObservations) === plannedOutPath) {
+    console.error(c.red("error: --out and --finding-observations must use different paths."));
+    return 1;
+  }
   const reportObservationError = (error) => {
     if (error) console.error(c.red(`error: finding observations failed: ${error.message}`));
   };
@@ -587,6 +592,7 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
     reviewerPrompt = readReviewerPrompt();
   } catch (e) {
     console.error(c.red(`error: ${e.message}`));
+    reportObservationError(findingSession?.writeUnknown());
     return 1;
   }
 
@@ -729,7 +735,7 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
   const finalText = finalizeOutput(validated.text, verdict);
 
   // Write the artifact (gitignored; never committed). --out overrides the default path.
-  const outPath = opts.out ? path.resolve(opts.out) : defaultOutPath(repo, opts.issue, round);
+  const outPath = plannedOutPath;
   try {
     mkdirSync(path.dirname(outPath), { recursive: true });
     writeFileSync(outPath, finalText);
