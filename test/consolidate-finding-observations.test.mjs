@@ -104,6 +104,11 @@ test("finding identity covers legacy heading bodies and mixed CodeRabbit dialect
     }, opts);
     assert.deepEqual(inventory.candidates.map((x) => x.severity), [severity]);
   }
+  const oneFinding = normalizeFindingInventory({
+    ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null, checks: { checks: [] },
+    issueComments: [{ body: "_⚠️ Potential issue_\n\n**Major:** Null input crashes.\n\nThis is a minor change to the guard." }],
+  }, opts);
+  assert.deepEqual(oneFinding.candidates.map((x) => x.severity), ["high"]);
 });
 
 test("opt-in inventory preserves GPT findings beyond the model prompt cap", async () => {
@@ -331,6 +336,8 @@ test("structured prompt contains opaque keys but not source prose", () => {
   assert.equal(prompt.includes(`"source_position":${inventory.candidates[0].source_position}`), true);
   assert.equal(prompt.includes('"source_locator":'), true);
   assert.equal(prompt.includes("unsafe retry"), false);
+  assert.match(prompt, /taxonomy\.fences.*sorted, unique, non-empty array/);
+  assert.match(prompt, /evidence_status.*complete for verified\/duplicate\/rejected/);
 });
 
 test("opt-in model failure retains exit 1 and writes partial observations", async () => {

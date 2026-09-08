@@ -134,9 +134,9 @@ function codeRabbitRecords(body, item) {
   }
   for (const [index, lineText] of lines.entries()) {
     if (found.some((record) => record.line === index + 1)) continue;
-    const severity = /potential issue|\bmajor\b/i.test(lineText) ? "high"
-      : /\bminor\b/i.test(lineText) ? "medium"
-        : /nitpick/i.test(lineText) ? "low" : null;
+    const label = lineText.match(/^\s*(?:[-*]\s*)?(?:\*\*|__)?(major|minor|nitpick)(?:\*\*|__)?(?:\s*(?::|—|-)\s*|\s+).+/i)?.[1]?.toLowerCase();
+    const severity = label === "major" ? "high" : label === "minor" ? "medium" : label === "nitpick" ? "low"
+      : /^\s*_[^A-Za-z0-9]*nitpick_\s*$/i.test(lineText) ? "low" : null;
     if (severity) found.push({ line: index + 1, severity });
   }
   found.sort((a, b) => a.line - b.line);
@@ -145,8 +145,9 @@ function codeRabbitRecords(body, item) {
     evidence_sha256: sha256(lines.slice(line - 1, (found[index + 1]?.line ?? lines.length + 1) - 1).join("\n")),
     source_locator: { kind: "item-line", item, line },
   }));
-  return /severity/i.test(text)
-    ? [{ severity: "unknown", evidence_sha256: sha256(text), source_locator: { kind: "item-line", item, line: 1 } }]
+  const potentialLine = lines.findIndex((line) => /potential issue/i.test(line));
+  return potentialLine >= 0 || /severity/i.test(text)
+    ? [{ severity: potentialLine >= 0 ? "high" : "unknown", evidence_sha256: sha256(text), source_locator: { kind: "item-line", item, line: Math.max(1, potentialLine + 1) } }]
     : [];
 }
 
@@ -244,7 +245,10 @@ export function buildFindingEnvelopePrompt(basePrompt, inventory) {
     '`outcome` is verified, duplicate, rejected, or incomplete. `duplicate_target` is another listed ' +
     'source key only for duplicate, otherwise null. Taxonomy enums: severity critical/high/medium/low/unknown; ' +
     'defect_class logic/security/gate-integrity/test-integrity/verifiability/contract-drift/docs/perf/unknown; ' +
-    'determinism deterministic/flaky/unverified/unknown; fences none/migration/credential/schema/public-api/release/unknown. ' +
+    'determinism deterministic/flaky/unverified/unknown. `taxonomy.fences` is a sorted, unique, non-empty array ' +
+    'of none/migration/credential/schema/public-api/release/unknown; none and unknown cannot be combined with another fence. ' +
+    '`evidence_status` is complete, incomplete, or unknown: it must be complete for verified/duplicate/rejected, ' +
+    'and incomplete or unknown for incomplete. `codebases` is a sorted, unique, non-empty array including the source codebase. ' +
     `Allowed codebases: ${JSON.stringify([...new Set([inventory.codebase])])}. ` +
     `Opaque inventory: ${JSON.stringify(opaque)}\n`;
 }
