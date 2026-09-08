@@ -638,7 +638,11 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
     // Persist a crash-safe discovery checkpoint before any downstream provider/config work.
     // Successful consolidation atomically replaces it with the complete ledger; any hard exit
     // after trustworthy capture still leaves discovered/incomplete evidence behind.
-    reportObservationError(findingSession.writePartial(findingInventory));
+    const checkpointError = findingSession.writePartial(findingInventory);
+    if (checkpointError) {
+      reportObservationError(checkpointError);
+      return 1;
+    }
   }
 
   // Deterministic pre-extraction (single severity dialect). Scan EVERY gathered textual

@@ -25,7 +25,6 @@ import { extractFindingSeverityRecords } from "../scripts/finding-severity-recor
 import { hasCriticalOrHighFindings } from "../scripts/severity.mjs";
 import { cmdConsolidateFindings } from "../scripts/consolidate-findings.mjs";
 import { parseCheckResults } from "../scripts/consolidate-findings.mjs";
-
 const registry = loadFindingRegistry();
 const BASE_INPUTS = {
   localBugbotMarkdown: "- High: unsafe retry\n",
@@ -423,8 +422,10 @@ test("opt-in model failure retains exit 1 and writes partial observations", asyn
   const records = readFileSync(out, "utf8").trim().split("\n").map(JSON.parse);
   assert.equal(records.at(-1).capture_status, "partial");
   assert.equal(records.some((x) => x.state === "incomplete"), true);
+  writeFileSync(`${out}.lock`, JSON.stringify({ pid: process.pid, created_at_ms: Date.now(), nonce: "held" }));
+  let called = false; const lockedCode = await cmdConsolidateFindings(repo, ["--pr", "44", "--issue", "AIO-1100", "--repo", "aiosbrain/aios-devtools", "--local-bugbot-review", review, "--finding-observations", out], { runGh, readReviewerPrompt: () => "review", callAgent: async () => { called = true; }, now: () => "2026-09-08T00:00:00Z" });
+  assert.equal(lockedCode, 1); assert.equal(called, false);
 });
-
 test("opt-in success makes one model call and writes the model report plus validated JSONL", async () => {
   const repo = mkdtempSync(path.join(tmpdir(), "finding-success-"));
   const review = path.join(repo, "bugbot.md"); writeFileSync(review, "- Low: wording\n");
@@ -450,7 +451,6 @@ test("opt-in success makes one model call and writes the model report plus valid
   assert.equal(validateFindingObservations(records, registry), true);
   assert.equal(records.at(-1).counts.terminal_stage, 1);
   assert.equal(records.every((record) => record.observed_at === "2026-09-09T00:00:00Z"), true);
-
   const blockedMarkdown = path.join(repo, "blocked.md");
   const blockedCode = await cmdConsolidateFindings(repo, ["--pr", "44", "--issue", "AIO-1100", "--repo", "aiosbrain/aios-devtools", "--local-bugbot-review", review, "--out", blockedMarkdown, "--finding-observations", out], {
     runGh, readReviewerPrompt: () => "review", now: () => "2026-09-09T00:00:00Z",
