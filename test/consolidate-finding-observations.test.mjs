@@ -191,6 +191,11 @@ test("source ordering and exact replay preserve identities and bytes", () => {
   const bytesA = projectFindingObservations(a, parseFindingEnvelope(envelope(a), a, registry)).map(canonical).join("\n");
   const bytesB = projectFindingObservations(b, parseFindingEnvelope(envelope(b), b, registry)).map(canonical).join("\n");
   assert.equal(bytesB, bytesA);
+  const later = normalizeFindingInventory(sourceInputs, { ...opts, observedAt: "2026-09-09T00:00:00Z" });
+  assert.notEqual(later.run_id, a.run_id);
+  assert.notEqual(later.attribution_run_id, a.attribution_run_id);
+  assert.notEqual(projectFindingObservations(later, null, { partial: true })[0].candidate_id,
+    projectFindingObservations(a, null, { partial: true })[0].candidate_id);
 });
 
 test("duplicate, rejected, incomplete, and cross-repo decisions remain one candidate each", () => {
@@ -329,7 +334,8 @@ test("writer is atomic, mode 0600, and refuses live or young locks", () => {
 });
 
 test("structured prompt contains opaque keys but not source prose", () => {
-  const inventory = normalizeFindingInventory(BASE_INPUTS, opts);
+  const multiRegistry = { ...registry, codebase_mappings: { ...registry.codebase_mappings, "test/other": "workspace" } };
+  const inventory = normalizeFindingInventory(BASE_INPUTS, { ...opts, registry: multiRegistry });
   const prompt = buildFindingEnvelopePrompt("legacy prompt contains raw evidence", inventory);
   assert.match(prompt, /Machine observation response/);
   assert.equal(prompt.includes(inventory.candidates[0].source_key), true);
@@ -338,6 +344,7 @@ test("structured prompt contains opaque keys but not source prose", () => {
   assert.equal(prompt.includes("unsafe retry"), false);
   assert.match(prompt, /taxonomy\.fences.*sorted, unique, non-empty array/);
   assert.match(prompt, /evidence_status.*complete for verified\/duplicate\/rejected/);
+  assert.equal(prompt.includes(`Allowed codebases: ${JSON.stringify([...new Set(Object.values(multiRegistry.codebase_mappings))].sort())}`), true);
 });
 
 test("opt-in model failure retains exit 1 and writes partial observations", async () => {

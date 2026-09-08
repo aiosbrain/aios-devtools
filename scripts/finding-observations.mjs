@@ -220,12 +220,13 @@ export function normalizeFindingInventory(inputs, { repoSlug, issue, pr, round =
   const detector_evidence_sha256 = sha256(canonical(detector));
   const at = observedAt ?? inputs.latestCommit?.committed_at;
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(at ?? "")) throw new Error("inventory observation time is unavailable");
-  const runSeed = { issue, pr: Number(pr), round, head: inputs.latestCommit?.sha ?? null, detector_evidence_sha256 };
+  const runSeed = { issue, pr: Number(pr), round, head: inputs.latestCommit?.sha ?? null, detector_evidence_sha256, observed_at: at };
   return {
     capture_status: "complete", detector_completed: true, detector_evidence_sha256,
     raw_candidates: candidates.length + malformed, malformed, candidates, codebase, issue_ref: issueRef, observed_at: at,
     run_id: sha256(canonical(runSeed)), program_id: sha256(canonical({ issue, codebase })),
-    attribution_run_id: sha256(canonical({ issue, pr: Number(pr), round, head: inputs.latestCommit?.sha ?? null })), attempt: round,
+    attribution_run_id: sha256(canonical({ issue, pr: Number(pr), round, head: inputs.latestCommit?.sha ?? null, observed_at: at })), attempt: round,
+    allowed_codebases: [...new Set(Object.values(registry.codebase_mappings))].sort(),
     pr: Number(pr),
   };
 }
@@ -249,7 +250,7 @@ export function buildFindingEnvelopePrompt(basePrompt, inventory) {
     'of none/migration/credential/schema/public-api/release/unknown; none and unknown cannot be combined with another fence. ' +
     '`evidence_status` is complete, incomplete, or unknown: it must be complete for verified/duplicate/rejected, ' +
     'and incomplete or unknown for incomplete. `codebases` is a sorted, unique, non-empty array including the source codebase. ' +
-    `Allowed codebases: ${JSON.stringify([...new Set([inventory.codebase])])}. ` +
+    `Allowed codebases: ${JSON.stringify(inventory.allowed_codebases)}. ` +
     `Opaque inventory: ${JSON.stringify(opaque)}\n`;
 }
 
@@ -356,7 +357,7 @@ export function projectFindingObservations(inventory, parsed = null, { partial =
 
 export function projectUnknownSummary({ issue, pr, round = 1, observedAt, registry, repoSlug }) {
   const { codebase, issueRef } = resolvePartition(registry, issue, repoSlug);
-  const run_id = sha256(canonical({ issue, pr: Number(pr), round, capture_status: "unknown" }));
+  const run_id = sha256(canonical({ issue, pr: Number(pr), round, capture_status: "unknown", observed_at: observedAt }));
   const inventory = { run_id, program_id: sha256(canonical({ issue, codebase })), attribution_run_id: run_id, issue_ref: issueRef, observed_at: observedAt, attempt: round };
   return [eventWithId({
     ...common(inventory, "unknown"), record_type: "run_summary", stage: "discovery", capture_status: "unknown",
