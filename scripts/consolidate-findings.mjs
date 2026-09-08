@@ -41,13 +41,13 @@ import { resolveLoopModels } from "./loop-models.mjs";
 // The verdict matchers live in the core leaf severity.mjs (AIO-594 F1) — a devtools-bound
 // file must not statically import stays-core review-bugbot.mjs.
 import {
-  extractFindingSeverityRecords,
   hasCriticalOrHighFindings,
   hasFindingsAtOrAbove,
   normalizeSeverity,
   rankFindings,
   rankSeverity,
 } from "./severity.mjs";
+import { extractFindingSeverityRecords } from "./finding-severity-records.mjs";
 import { DIFF_CAP } from "./build.mjs";
 import { stripToolkitDirArgs } from "./toolkit-locate.mjs";
 import { createFindingObservationSession } from "./finding-observations.mjs";
@@ -217,7 +217,7 @@ export function extractLocalBugbotSeverities(markdown) {
 
 // GPT-5.5 review markdown lists findings as `- \`High\` \`file\`: …`.
 export function extractGptSeverities(gptMarkdown) {
-  return extractFindingSeverityRecords(gptMarkdown)
+  return extractFindingSeverityRecords(gptMarkdown, { dialect: "gpt" })
     .map(({ severity }) => severity)
     .reduce((max, severity) => maxSev(max, severity), null);
 }
@@ -648,6 +648,10 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
       reportObservationError(findingSession.writeUnknown());
       return 1;
     }
+    // Persist a crash-safe discovery checkpoint before any downstream provider/config work.
+    // Successful consolidation atomically replaces it with the complete ledger; any hard exit
+    // after trustworthy capture still leaves discovered/incomplete evidence behind.
+    reportObservationError(findingSession.writePartial(findingInventory));
   }
 
   // Deterministic pre-extraction (single severity dialect). Scan EVERY gathered textual
@@ -673,6 +677,7 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
     models = resolveLoopModels({ repo, profile: opts.loopProfile ?? null });
   } catch (e) {
     console.error(c.red(`error: ${e.message}`));
+    reportObservationError(findingInventory && findingSession.writePartial(findingInventory));
     return 1;
   }
   const cfg = models.consolidate;

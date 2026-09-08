@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -20,7 +21,8 @@ import {
   validateFindingObservations,
   writeFindingObservations,
 } from "../scripts/finding-observations.mjs";
-import { extractFindingSeverityRecords, hasCriticalOrHighFindings } from "../scripts/severity.mjs";
+import { extractFindingSeverityRecords } from "../scripts/finding-severity-records.mjs";
+import { hasCriticalOrHighFindings } from "../scripts/severity.mjs";
 import { cmdConsolidateFindings } from "../scripts/consolidate-findings.mjs";
 import { parseCheckResults } from "../scripts/consolidate-findings.mjs";
 
@@ -118,7 +120,7 @@ test("inventory uses the canonical severity records for compact bullets, heading
   assert.equal(normalizeFindingInventory({ ...BASE_INPUTS, localBugbotMarkdown: heading, gptMarkdown: null, issueComments: [], checks: { checks: [] } }, opts).raw_candidates, 0);
 
   const gpt = "- `High` `scripts/x.mjs`: one finding";
-  assert.deepEqual(extractFindingSeverityRecords(gpt).map((x) => x.severity), ["High"]);
+  assert.deepEqual(extractFindingSeverityRecords(gpt, { dialect: "gpt" }).map((x) => x.severity), ["High"]);
   const gptInventory = normalizeFindingInventory({ ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: gpt, issueComments: [], checks: { checks: [] } }, opts);
   assert.equal(gptInventory.raw_candidates, 1);
   assert.equal(gptInventory.candidates[0].severity, "high");
@@ -172,6 +174,36 @@ test("provider failure after capture produces discovered/incomplete partial evid
   assert.equal(records.at(-1).capture_status, "partial");
   assert.equal(records.at(-1).counts.incomplete, 4);
   assert.equal(records.filter((x) => x.state === "incomplete").length, 4);
+});
+
+test("loop-model resolution failure after capture writes partial observations", async () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "finding-model-config-"));
+  mkdirSync(path.join(repo, ".aios"), { recursive: true });
+  writeFileSync(path.join(repo, ".aios", "loop-models.yaml"), "consolidate_model:\n");
+  const review = path.join(repo, "bugbot.md"); writeFileSync(review, "- High: unsafe retry\n");
+  const out = path.join(repo, "observations.jsonl");
+  const runner = path.join(repo, "run.mjs");
+  const moduleUrl = new URL("../scripts/consolidate-findings.mjs", import.meta.url).href;
+  writeFileSync(runner, `
+    import { cmdConsolidateFindings } from ${JSON.stringify(moduleUrl)};
+    const latest = ${JSON.stringify(BASE_INPUTS.latestCommit)};
+    const runGh = (argv) => {
+      if (argv[0] === "pr" && argv[1] === "checks") return { code: 0, stdout: "[]", stderr: "" };
+      if (argv[0] === "api" && argv[1].endsWith("/commits")) return JSON.stringify(latest);
+      if (argv[0] === "pr" && argv[1] === "diff") return "diff";
+      return "[]";
+    };
+    const code = await cmdConsolidateFindings(${JSON.stringify(repo)}, ["--pr", "44", "--issue", "AIO-1100", "--repo", "aiosbrain/aios-devtools", "--local-bugbot-review", ${JSON.stringify(review)}, "--finding-observations", ${JSON.stringify(out)}], {
+      runGh, readReviewerPrompt: () => "review", now: () => "2026-09-08T00:00:00Z",
+    });
+    process.exitCode = code;
+  `);
+  const child = spawnSync(process.execPath, [runner], { encoding: "utf8" });
+  assert.equal(child.status, 1);
+  assert.match(child.stderr, /invalid 'consolidate_model'/);
+  const records = readFileSync(out, "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(records.at(-1).capture_status, "partial");
+  assert.equal(records.some((x) => x.state === "incomplete"), true);
 });
 
 test("malformed source entries are counted without entering event value channels", () => {

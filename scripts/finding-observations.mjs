@@ -16,7 +16,7 @@ import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
-import { extractFindingSeverityRecords } from "./severity.mjs";
+import { extractFindingSeverityRecords } from "./finding-severity-records.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONTRACTS = path.join(HERE, "..", "contracts");
@@ -106,7 +106,7 @@ function resolvePartition(registry, issue, repoSlug) {
   return { codebase, issueRef };
 }
 
-const canonicalSeverities = (text) => extractFindingSeverityRecords(text).map(({ severity }) => severity.toLowerCase());
+const canonicalSeverities = (text, dialect = "canonical") => extractFindingSeverityRecords(text, { dialect }).map(({ severity }) => severity.toLowerCase());
 
 function codeRabbitSeverities(body) {
   const text = String(body ?? "");
@@ -131,7 +131,7 @@ function makeInventoryRecords(inputs) {
     throw new Error("plaintext CI evidence has no trustworthy candidate denominator");
   }
   sources.push({ source_type: "local-bugbot", severities: canonicalSeverities(inputs.localBugbotMarkdown) });
-  sources.push({ source_type: "gpt", severities: canonicalSeverities(inputs.gptMarkdown) });
+  sources.push({ source_type: "gpt", severities: canonicalSeverities(inputs.gptMarkdown, "gpt") });
   for (const [source_type, items] of [
     ["coderabbit-issue", inputs.issueComments], ["coderabbit-inline", inputs.inlineComments],
     ["coderabbit-review", inputs.reviews],
