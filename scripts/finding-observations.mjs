@@ -17,6 +17,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import { extractFindingSeverityRecords } from "./finding-severity-records.mjs";
+import { checkIsPending, checkIsRed } from "./ci-status.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONTRACTS = path.join(HERE, "..", "contracts");
@@ -108,9 +109,10 @@ function resolvePartition(registry, issue, repoSlug) {
 
 function textFindingRecords(text, dialect = "canonical") {
   const lines = String(text ?? "").split("\n");
-  return extractFindingSeverityRecords(text, { dialect }).map(({ line, severity }) => ({
+  const found = extractFindingSeverityRecords(text, { dialect });
+  return found.map(({ line, severity }, index) => ({
     severity: severity.toLowerCase(),
-    evidence_sha256: sha256(lines[line - 1] ?? ""),
+    evidence_sha256: sha256(lines.slice(line - 1, (found[index + 1]?.line ?? lines.length + 1) - 1).join("\n")),
     source_locator: { kind: "line", line },
   }));
 }
@@ -124,11 +126,17 @@ function codeRabbitRecords(body, item) {
       : ["major", "high"].includes(token) ? "high"
         : ["medium", "minor"].includes(token) ? "medium" : "low";
     const line = text.slice(0, m.index).split("\n").length;
-    return { severity, evidence_sha256: sha256(text.split("\n")[line - 1] ?? ""), source_locator: { kind: "item-line", item, line } };
+    return { severity, line };
   });
-  if (found.length) return found;
-  const listed = textFindingRecords(text).map((record) => ({ ...record, source_locator: { kind: "item-line", item, line: record.source_locator.line } }));
-  if (listed.length) return listed;
+  for (const { line, severity } of extractFindingSeverityRecords(text)) {
+    if (!found.some((record) => record.line === line)) found.push({ line, severity: severity.toLowerCase() });
+  }
+  found.sort((a, b) => a.line - b.line);
+  if (found.length) return found.map(({ line, severity }, index) => ({
+    severity,
+    evidence_sha256: sha256(text.split("\n").slice(line - 1, (found[index + 1]?.line ?? text.split("\n").length + 1) - 1).join("\n")),
+    source_locator: { kind: "item-line", item, line },
+  }));
   return /potential issue|severity/i.test(text)
     ? [{ severity: "unknown", evidence_sha256: sha256(text), source_locator: { kind: "item-line", item, line: 1 } }]
     : [];
@@ -155,9 +163,9 @@ function makeInventoryRecords(inputs) {
   }
   const ci = [];
   for (const [item, check] of (inputs.checks?.checks ?? []).entries()) {
-    if (["fail", "cancel"].includes(check.bucket) || ["FAILURE", "CANCELLED", "ERROR", "TIMED_OUT"].includes(check.state)) {
+    if (checkIsRed(check)) {
       ci.push({ severity: "high", evidence_sha256: sha256(canonical(check)), source_locator: { kind: "check", item } });
-    } else if (check.bucket === "pending" || ["PENDING", "IN_PROGRESS", "QUEUED"].includes(check.state)) {
+    } else if (checkIsPending(check)) {
       ci.push({ severity: "unknown", evidence_sha256: sha256(canonical(check)), source_locator: { kind: "check", item } });
     }
   }

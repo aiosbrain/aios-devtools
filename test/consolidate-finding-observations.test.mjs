@@ -86,6 +86,30 @@ test("splits bundled CodeRabbit findings and accepts legacy Bugbot severity head
   assert.deepEqual(inventory.candidates.map((x) => x.severity).sort(), ["high", "high", "medium"]);
 });
 
+test("finding identity covers legacy heading bodies and mixed CodeRabbit dialects", () => {
+  const legacy = (body) => normalizeFindingInventory({
+    ...BASE_INPUTS, localBugbotMarkdown: `**High Severity**\n\n${body}\n`,
+    gptMarkdown: null, issueComments: [], checks: { checks: [] },
+  }, opts);
+  assert.notEqual(legacy("Retry loops forever.").candidates[0].source_key, legacy("Credentials are exposed.").candidates[0].source_key);
+  const mixed = normalizeFindingInventory({
+    ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null,
+    issueComments: [{ body: "**Major:** first defect\n\n[Low] README.md:1 — second defect" }], checks: { checks: [] },
+  }, opts);
+  assert.deepEqual(mixed.candidates.map((x) => x.severity).sort(), ["high", "low"]);
+});
+
+test("inventory uses the verdict's complete structured CI classification", () => {
+  for (const [state, severity] of [["ACTION_REQUIRED", "high"], ["STARTUP_FAILURE", "high"], ["REQUESTED", "unknown"], ["WAITING", "unknown"]]) {
+    const checks = parseCheckResults(JSON.stringify([{ name: state, state }]));
+    const inventory = normalizeFindingInventory({
+      ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null, issueComments: [], checks,
+    }, opts);
+    assert.equal(inventory.raw_candidates, 1);
+    assert.equal(inventory.candidates[0].severity, severity);
+  }
+});
+
 test("does not double-count overlapping CodeRabbit severity syntax", () => {
   const inputs = { ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null, issueComments: [{ body: "**High:** SQL injection" }], checks: { checks: [] } };
   assert.equal(normalizeFindingInventory(inputs, opts).raw_candidates, 1);

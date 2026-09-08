@@ -48,6 +48,7 @@ import {
   rankSeverity,
 } from "./severity.mjs";
 import { extractFindingSeverityRecords } from "./finding-severity-records.mjs";
+import { checkIsPending, checkIsRed } from "./ci-status.mjs";
 import { DIFF_CAP } from "./build.mjs";
 import { stripToolkitDirArgs } from "./toolkit-locate.mjs";
 import { createFindingObservationSession } from "./finding-observations.mjs";
@@ -58,46 +59,18 @@ const ISSUE_RE = /^AIO-\d+$/;
 // The PR diff shares build.mjs's DIFF_CAP so the two caps never silently drift.
 export const GPT_REVIEW_CAP = 20000;
 export const DEFAULT_CONSOLIDATE_TIMEOUT = 300; // seconds
-// CI states/conclusions that mean the board is red (block-worthy).
-const CI_RED = new Set([
-  "FAILURE",
-  "TIMED_OUT",
-  "CANCELLED",
-  "ACTION_REQUIRED",
-  "STARTUP_FAILURE",
-  "ERROR",
-]);
-
 // Non-terminal (pending/in-flight) check states. The consolidator runs AFTER wait-for-bots,
 // so a still-pending check means CI evidence is INCOMPLETE — the board hasn't settled and a
 // pending job could still fail. Fail closed: block on a pending board rather than let the
 // model mark a PR merge-ready before CI finishes (the reviewer's "pending fails open" gap).
-const CI_PENDING = new Set([
-  "PENDING",
-  "IN_PROGRESS",
-  "QUEUED",
-  "REQUESTED",
-  "WAITING",
-  "EXPECTED",
-]);
-
 // `gh pr checks --json` emits a `bucket` field that categorizes `state` into one of:
 // pass | fail | pending | skipping | cancel. It is the authoritative, gh-computed
-// classification — we key off it first, then fall back to the raw state sets above so
+// classification — the shared classifier keys off it first, then falls back to raw states so
 // older gh / odd states are still covered. (There is NO `conclusion` field on this
 // command — requesting it makes gh exit 1 with "Unknown JSON field", which is why the
 // check board used to always come back unavailable.)
-const CI_RED_BUCKET = new Set(["fail", "cancel"]);
-const CI_PENDING_BUCKET = new Set(["pending"]);
-
 // A red / pending check — bucket first, then the raw state sets. `skipping` (skipped) and
 // `neutral` are benign (neither red nor pending).
-function checkIsRed(x) {
-  return CI_RED_BUCKET.has(x.bucket) || CI_RED.has(x.state) || CI_RED.has(x.conclusion);
-}
-function checkIsPending(x) {
-  return CI_PENDING_BUCKET.has(x.bucket) || CI_PENDING.has(x.state) || CI_PENDING.has(x.conclusion);
-}
 
 const REVIEWER_PROMPT_REL = path.join(".claude", "agents", "code-reviewer.md");
 
