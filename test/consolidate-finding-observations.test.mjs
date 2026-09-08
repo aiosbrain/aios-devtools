@@ -398,6 +398,18 @@ test("opt-in success makes one model call and writes the model report plus valid
   assert.equal(validateFindingObservations(records, registry), true);
   assert.equal(records.at(-1).counts.terminal_stage, 1);
   assert.equal(records.every((record) => record.observed_at === "2026-09-09T00:00:00Z"), true);
+
+  const blockedMarkdown = path.join(repo, "blocked.md");
+  const blockedCode = await cmdConsolidateFindings(repo, ["--pr", "44", "--issue", "AIO-1100", "--repo", "aiosbrain/aios-devtools", "--local-bugbot-review", review, "--out", blockedMarkdown, "--finding-observations", out], {
+    runGh, readReviewerPrompt: () => "review", now: () => "2026-09-09T00:00:00Z",
+    callAgent: async (prompt) => {
+      const opaque = JSON.parse(prompt.match(/Opaque inventory: (\[[^\n]+\])/)[1]);
+      return JSON.stringify({ report_markdown: "## Verdict\n\nCLEAR\n\nBUGBOT_CLEAR\n", decisions: opaque.map((x) => ({ source_key: x.source_key, outcome: "verified", duplicate_target: null, codebases: ["aios-devtools"], taxonomy: { severity: "high", defect_class: "logic", determinism: "deterministic", fences: ["none"] }, evidence_status: "complete" })) });
+    },
+  });
+  assert.equal(blockedCode, 3);
+  assert.match(readFileSync(blockedMarkdown, "utf8"), /\[High\].*source reported a High finding/i);
+  assert.equal(readFileSync(blockedMarkdown, "utf8").includes("BUGBOT_CLEAR"), false);
 });
 
 test("pre-inventory gather failure writes an unknown summary and keeps exit 1", async () => {

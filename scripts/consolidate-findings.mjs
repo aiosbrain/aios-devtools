@@ -709,9 +709,15 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
   }
 
   // Deterministic post-validation (fail-closed) + final verdict (forced block is unloseable).
+  const decisionMax = findingEnvelope
+    ? [...findingEnvelope.decisions.values()]
+      .filter((decision) => decision.outcome === "verified")
+      .map((decision) => normalizeSeverity(decision.taxonomy.severity))
+      .reduce((highest, severity) => maxSev(highest, severity), null)
+    : null;
   const validated = postValidate({
     modelOutput,
-    sourceMax,
+    sourceMax: maxSev(sourceMax, decisionMax),
     ciRed,
     ciPending,
     checks: inputs.checks,
