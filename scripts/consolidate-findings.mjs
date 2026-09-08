@@ -387,7 +387,7 @@ export function filterCurrentHeadCodeRabbit(records, latestCommitAt) {
 }
 
 // Gather every input per code-reviewer.md §"How to gather inputs" — now INCLUDING the PR diff.
-export function gatherInputs({ runGh, slug, pr, localBugbotReviewPath, gptReviewPath } = {}) {
+export function gatherInputs({ runGh, slug, pr, localBugbotReviewPath, gptReviewPath, preserveFullGpt = false } = {}) {
   // 1. CI checks (tolerate a red/pending board — it's data, not a crash).
   const checksRes = runGh(
     ["pr", "checks", String(pr), "--repo", slug, "--json", "name,state,bucket"],
@@ -472,17 +472,19 @@ export function gatherInputs({ runGh, slug, pr, localBugbotReviewPath, gptReview
   const localBugbotMarkdown = readFileSync(localBugbotReviewPath, "utf8");
 
   let gptMarkdown = null;
+  let gptObservationMarkdown = null;
   if (gptReviewPath) {
     if (!existsSync(gptReviewPath))
       throw new Error(`--gpt-review file not found: ${gptReviewPath}`);
     gptMarkdown = readFileSync(gptReviewPath, "utf8");
+    if (preserveFullGpt) gptObservationMarkdown = gptMarkdown;
     if (gptMarkdown.length > GPT_REVIEW_CAP) {
       gptMarkdown =
         gptMarkdown.slice(0, GPT_REVIEW_CAP) + `\n\n(diff truncated at ${GPT_REVIEW_CAP} chars)`;
     }
   }
 
-  return {
+  const gathered = {
     pr,
     checks,
     prDiff,
@@ -493,6 +495,8 @@ export function gatherInputs({ runGh, slug, pr, localBugbotReviewPath, gptReview
     localBugbotMarkdown,
     gptMarkdown,
   };
+  if (preserveFullGpt) gathered.gptObservationMarkdown = gptObservationMarkdown;
+  return gathered;
 }
 
 // ── public entry ──────────────────────────────────────────────────────────────
@@ -592,6 +596,7 @@ export async function cmdConsolidateFindings(repo, args, deps = {}) {
       pr: opts.pr,
       localBugbotReviewPath: opts.localBugbotReview,
       gptReviewPath: opts.gptReview,
+      preserveFullGpt: !!findingSession,
     });
   } catch (e) {
     console.error(c.red(`error: gathering inputs failed: ${e.message}`));

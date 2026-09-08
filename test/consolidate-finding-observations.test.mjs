@@ -97,6 +97,30 @@ test("finding identity covers legacy heading bodies and mixed CodeRabbit dialect
     issueComments: [{ body: "**Major:** first defect\n\n[Low] README.md:1 — second defect" }], checks: { checks: [] },
   }, opts);
   assert.deepEqual(mixed.candidates.map((x) => x.severity).sort(), ["high", "low"]);
+  for (const [body, severity] of [["_🧹 Nitpick_\n\nRename this variable.", "low"], ["**Minor** wording issue", "medium"]]) {
+    const inventory = normalizeFindingInventory({
+      ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null,
+      issueComments: [{ body }], checks: { checks: [] },
+    }, opts);
+    assert.deepEqual(inventory.candidates.map((x) => x.severity), [severity]);
+  }
+});
+
+test("opt-in inventory preserves GPT findings beyond the model prompt cap", async () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "finding-gpt-cap-"));
+  const review = path.join(repo, "bugbot.md"); writeFileSync(review, "BUGBOT_CLEAR\n");
+  const gptReview = path.join(repo, "gpt.md"); writeFileSync(gptReview, `${"x".repeat(21000)}\n- \`High\` late finding\n`);
+  const { gatherInputs, GPT_REVIEW_CAP } = await import("../scripts/consolidate-findings.mjs");
+  const runGh = (argv) => {
+    if (argv[0] === "pr" && argv[1] === "checks") return { code: 0, stdout: "[]", stderr: "" };
+    if (argv[0] === "api" && argv[1].endsWith("/commits")) return JSON.stringify(BASE_INPUTS.latestCommit);
+    if (argv[0] === "pr" && argv[1] === "diff") return "diff";
+    return "[]";
+  };
+  const inputs = gatherInputs({ runGh, slug: "aiosbrain/aios-devtools", pr: 44, localBugbotReviewPath: review, gptReviewPath: gptReview, preserveFullGpt: true });
+  assert.equal(inputs.gptMarkdown.length < inputs.gptObservationMarkdown.length, true);
+  assert.equal(inputs.gptMarkdown.includes(`truncated at ${GPT_REVIEW_CAP}`), true);
+  assert.deepEqual(normalizeFindingInventory(inputs, opts).candidates.map((x) => x.severity), ["high"]);
 });
 
 test("inventory uses the verdict's complete structured CI classification", () => {

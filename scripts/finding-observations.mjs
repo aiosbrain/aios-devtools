@@ -119,6 +119,7 @@ function textFindingRecords(text, dialect = "canonical") {
 
 function codeRabbitRecords(body, item) {
   const text = String(body ?? "");
+  const lines = text.split("\n");
   const structured = [...text.matchAll(/\*\*(critical|blocker|major|high|medium|minor|low|nitpick)(?:\s+severity)?(?::\*\*|\*\*\s*:)/gi)];
   const found = structured.map((m) => {
     const token = m[1].toLowerCase();
@@ -131,13 +132,20 @@ function codeRabbitRecords(body, item) {
   for (const { line, severity } of extractFindingSeverityRecords(text)) {
     if (!found.some((record) => record.line === line)) found.push({ line, severity: severity.toLowerCase() });
   }
+  for (const [index, lineText] of lines.entries()) {
+    if (found.some((record) => record.line === index + 1)) continue;
+    const severity = /potential issue|\bmajor\b/i.test(lineText) ? "high"
+      : /\bminor\b/i.test(lineText) ? "medium"
+        : /nitpick/i.test(lineText) ? "low" : null;
+    if (severity) found.push({ line: index + 1, severity });
+  }
   found.sort((a, b) => a.line - b.line);
   if (found.length) return found.map(({ line, severity }, index) => ({
     severity,
-    evidence_sha256: sha256(text.split("\n").slice(line - 1, (found[index + 1]?.line ?? text.split("\n").length + 1) - 1).join("\n")),
+    evidence_sha256: sha256(lines.slice(line - 1, (found[index + 1]?.line ?? lines.length + 1) - 1).join("\n")),
     source_locator: { kind: "item-line", item, line },
   }));
-  return /potential issue|severity/i.test(text)
+  return /severity/i.test(text)
     ? [{ severity: "unknown", evidence_sha256: sha256(text), source_locator: { kind: "item-line", item, line: 1 } }]
     : [];
 }
@@ -149,7 +157,7 @@ function makeInventoryRecords(inputs) {
     throw new Error("plaintext CI evidence has no trustworthy candidate denominator");
   }
   sources.push({ source_type: "local-bugbot", records: textFindingRecords(inputs.localBugbotMarkdown) });
-  sources.push({ source_type: "gpt", records: textFindingRecords(inputs.gptMarkdown, "gpt") });
+  sources.push({ source_type: "gpt", records: textFindingRecords(inputs.gptObservationMarkdown ?? inputs.gptMarkdown, "gpt") });
   for (const [source_type, items] of [
     ["coderabbit-issue", inputs.issueComments], ["coderabbit-inline", inputs.inlineComments],
     ["coderabbit-review", inputs.reviews],
