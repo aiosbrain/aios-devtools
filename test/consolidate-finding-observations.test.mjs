@@ -216,6 +216,15 @@ test("source ordering and exact replay preserve identities and bytes", () => {
   assert.notEqual(later.attribution_run_id, a.attribution_run_id);
   assert.notEqual(projectFindingObservations(later, null, { partial: true })[0].candidate_id,
     projectFindingObservations(a, null, { partial: true })[0].candidate_id);
+
+  const identical = { ...BASE_INPUTS, issueComments: [], inlineComments: [
+    { path: "src/a.mjs", line: 10, body: "**Major:** Missing null check." },
+    { path: "src/b.mjs", line: 20, body: "**Major:** Missing null check." },
+  ] };
+  const forward = normalizeFindingInventory(identical, opts);
+  const reversed = normalizeFindingInventory({ ...identical, inlineComments: [...identical.inlineComments].reverse() }, opts);
+  assert.deepEqual(stableProjection(reversed), stableProjection(forward));
+  assert.equal(new Set(forward.candidates.filter((candidate) => candidate.source_type === "coderabbit-inline").map((candidate) => candidate.source_key)).size, 2);
 });
 
 test("duplicate, rejected, incomplete, and cross-repo decisions remain one candidate each", () => {

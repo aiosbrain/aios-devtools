@@ -109,7 +109,26 @@ function textFindingRecords(text, dialect = "canonical") {
   }));
 }
 
-function codeRabbitRecords(body, item) {
+function codeRabbitItemIdentity(value) {
+  const identity = {};
+  if (value.path !== undefined) {
+    if (typeof value.path !== "string" || value.path.length > 500 || value.path.startsWith("/") || /(^|\/)\.\.(\/|$)|[\u0000-\u001f]/.test(value.path)) throw new Error("unsafe CodeRabbit path");
+    identity.path = value.path;
+  }
+  if (value.line !== undefined) {
+    if (!Number.isInteger(value.line) || value.line < 1) throw new Error("unsafe CodeRabbit line");
+    identity.line = value.line;
+  }
+  for (const key of ["created_at", "submitted_at", "state"]) {
+    if (value[key] !== undefined) {
+      if (typeof value[key] !== "string" || value[key].length > 64 || /[\u0000-\u001f]/.test(value[key])) throw new Error(`unsafe CodeRabbit ${key}`);
+      identity[key] = value[key];
+    }
+  }
+  return sha256(canonical(identity));
+}
+
+function codeRabbitRecords(body, item, itemIdentity) {
   const text = String(body ?? "");
   const lines = text.split("\n");
   const structured = [...text.matchAll(/\*\*(critical|blocker|major|high|medium|minor|low|nitpick)(?:\s+severity)?(?::\*\*|\*\*\s*:)/gi)];
@@ -143,11 +162,11 @@ function codeRabbitRecords(body, item) {
   found.sort((a, b) => a.line - b.line);
   if (found.length) return found.map(({ line, severity }, index) => ({
     severity,
-    evidence_sha256: sha256(lines.slice(line - 1, (found[index + 1]?.line ?? lines.length + 1) - 1).join("\n")),
+    evidence_sha256: sha256(canonical({ item: itemIdentity, evidence: lines.slice(line - 1, (found[index + 1]?.line ?? lines.length + 1) - 1).join("\n") })),
     source_locator: { kind: "item-line", item, line },
   }));
   return /severity/i.test(text)
-    ? [{ severity: "unknown", evidence_sha256: sha256(text), source_locator: { kind: "item-line", item, line: 1 } }]
+    ? [{ severity: "unknown", evidence_sha256: sha256(canonical({ item: itemIdentity, evidence: text })), source_locator: { kind: "item-line", item, line: 1 } }]
     : [];
 }
 
@@ -167,7 +186,8 @@ function makeInventoryRecords(inputs) {
     const records = [];
     for (const [itemIndex, item] of (items ?? []).entries()) {
       if (!item || typeof item !== "object" || (item.body !== undefined && typeof item.body !== "string")) { malformed++; continue; }
-      records.push(...codeRabbitRecords(item.body, itemIndex));
+      try { records.push(...codeRabbitRecords(item.body, itemIndex, codeRabbitItemIdentity(item))); }
+      catch { malformed++; }
     }
     sources.push({ source_type, records });
   }
