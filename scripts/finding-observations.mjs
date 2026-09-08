@@ -450,7 +450,7 @@ export function createFindingObservationSession({ outputPath, configPath, issue,
     catch (error) { return error; }
   };
   return {
-    capture: (inputs) => normalizeFindingInventory(inputs, { repoSlug, issue, pr, round, registry }),
+    capture: (inputs) => normalizeFindingInventory(inputs, { repoSlug, issue, pr, round, registry, observedAt }),
     prompt: buildFindingEnvelopePrompt,
     parse: (output, inventory) => parseFindingEnvelope(output, inventory, registry),
     writeUnknown: () => safeWrite(projectUnknownSummary({ issue, pr, round, observedAt, registry, repoSlug })),

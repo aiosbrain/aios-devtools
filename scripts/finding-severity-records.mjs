@@ -3,7 +3,7 @@
 import { hasFindingsAtOrAbove } from "./severity.mjs";
 
 const SEVERITIES = ["Critical", "High", "Medium", "Low"];
-const GPT_RECORD = /^\s*-\s*`(Critical|High|Medium|Low)`\s+`[^`\n]+`/i;
+const GPT_RECORD = /^\s*-\s*`(Critical|High|Medium|Low)`/i;
 
 function classifyCanonicalLine(line) {
   return SEVERITIES.find((severity) => hasFindingsAtOrAbove(line, severity)) ?? null;

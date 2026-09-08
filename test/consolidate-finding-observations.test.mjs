@@ -119,7 +119,7 @@ test("inventory uses the canonical severity records for compact bullets, heading
   assert.equal(hasCriticalOrHighFindings(heading), false);
   assert.equal(normalizeFindingInventory({ ...BASE_INPUTS, localBugbotMarkdown: heading, gptMarkdown: null, issueComments: [], checks: { checks: [] } }, opts).raw_candidates, 0);
 
-  const gpt = "- `High` `scripts/x.mjs`: one finding";
+  const gpt = "- `High` scripts/x.mjs: one finding";
   assert.deepEqual(extractFindingSeverityRecords(gpt, { dialect: "gpt" }).map((x) => x.severity), ["High"]);
   const gptInventory = normalizeFindingInventory({ ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: gpt, issueComments: [], checks: { checks: [] } }, opts);
   assert.equal(gptInventory.raw_candidates, 1);
@@ -313,7 +313,7 @@ test("opt-in success makes one model call and writes the model report plus valid
   };
   let calls = 0;
   const code = await cmdConsolidateFindings(repo, ["--pr", "44", "--issue", "AIO-1100", "--repo", "aiosbrain/aios-devtools", "--local-bugbot-review", review, "--out", markdown, "--finding-observations", out], {
-    runGh, readReviewerPrompt: () => "review", now: () => "2026-09-08T00:00:00Z",
+    runGh, readReviewerPrompt: () => "review", now: () => "2026-09-09T00:00:00Z",
     callAgent: async (prompt) => {
       calls++;
       const opaque = JSON.parse(prompt.match(/Opaque inventory: (\[[^\n]+\])/)[1]);
@@ -325,6 +325,7 @@ test("opt-in success makes one model call and writes the model report plus valid
   const records = readFileSync(out, "utf8").trim().split("\n").map(JSON.parse);
   assert.equal(validateFindingObservations(records, registry), true);
   assert.equal(records.at(-1).counts.terminal_stage, 1);
+  assert.equal(records.every((record) => record.observed_at === "2026-09-09T00:00:00Z"), true);
 });
 
 test("pre-inventory gather failure writes an unknown summary and keeps exit 1", async () => {
