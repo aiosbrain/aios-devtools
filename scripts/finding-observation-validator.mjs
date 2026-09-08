@@ -118,30 +118,34 @@ function collectRecords(records, registry, context, schema) {
   return { candidates, summary };
 }
 
+function validateCandidateChain(list, candidates, context) {
+  list.sort((left, right) => left.sequence - right.sequence);
+  const first = list[0];
+  if (first.sequence !== 0 || first.state !== "discovered" || first.predecessor_event_id !== null) {
+    throw new Error("invalid discovery lifecycle");
+  }
+  for (let index = 1; index < list.length; index++) {
+    const current = list[index];
+    const previous = list[index - 1];
+    if (current.sequence !== index || current.predecessor_event_id !== previous.event_id
+      || context.canonical(current.identity) !== context.canonical(first.identity)) {
+      throw new Error("invalid finding lifecycle chain");
+    }
+    if (!TRANSITIONS.get(previous.state)?.has(current.state)) {
+      throw new Error(`illegal finding transition: ${previous.state} -> ${current.state}`);
+    }
+    const expectedEpisode = current.state === "reopened" ? previous.episode + 1 : previous.episode;
+    if (current.episode !== expectedEpisode) throw new Error("invalid finding lifecycle episode");
+  }
+  const duplicate = list.find((record) => record.state === "duplicate");
+  if (duplicate && (!candidates.has(duplicate.duplicate_target) || duplicate.duplicate_target === duplicate.candidate_id)) {
+    throw new Error("duplicate target is unknown or self-referential");
+  }
+}
+
 function validateCandidateChains(candidates, context) {
   for (const list of candidates.values()) {
-    list.sort((left, right) => left.sequence - right.sequence);
-    const first = list[0];
-    if (first.sequence !== 0 || first.state !== "discovered" || first.predecessor_event_id !== null) {
-      throw new Error("invalid discovery lifecycle");
-    }
-    for (let index = 1; index < list.length; index++) {
-      const current = list[index];
-      const previous = list[index - 1];
-      if (current.sequence !== index || current.predecessor_event_id !== previous.event_id
-        || context.canonical(current.identity) !== context.canonical(first.identity)) {
-        throw new Error("invalid finding lifecycle chain");
-      }
-      if (!TRANSITIONS.get(previous.state)?.has(current.state)) {
-        throw new Error(`illegal finding transition: ${previous.state} -> ${current.state}`);
-      }
-      const expectedEpisode = current.state === "reopened" ? previous.episode + 1 : previous.episode;
-      if (current.episode !== expectedEpisode) throw new Error("invalid finding lifecycle episode");
-    }
-    const duplicate = list.find((record) => record.state === "duplicate");
-    if (duplicate && (!candidates.has(duplicate.duplicate_target) || duplicate.duplicate_target === duplicate.candidate_id)) {
-      throw new Error("duplicate target is unknown or self-referential");
-    }
+    validateCandidateChain(list, candidates, context);
   }
 }
 
