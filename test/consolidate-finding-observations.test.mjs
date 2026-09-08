@@ -388,8 +388,8 @@ test("writer is atomic, mode 0600, and refuses live or young locks", () => {
   assert.throws(() => writeFindingObservations(out, records, registry), /locked|invalid/);
   utimesSync(`${out}.lock.recovery-orphan`, new Date(old), new Date(old));
   writeFindingObservations(out, records, registry);
+  writeFileSync(`${out}.lock`, "{"); utimesSync(`${out}.lock`, new Date(old), new Date(old)); writeFindingObservations(out, records, registry);
 });
-
 test("structured prompt contains opaque keys but not source prose", () => {
   const multiRegistry = { ...registry, codebase_mappings: { ...registry.codebase_mappings, "test/other": "workspace" } };
   const inventory = normalizeFindingInventory(BASE_INPUTS, { ...opts, registry: multiRegistry });

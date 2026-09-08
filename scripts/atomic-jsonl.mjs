@@ -1,5 +1,5 @@
 import {
-  closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync,
+  closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync,
   renameSync, statSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -27,13 +27,18 @@ function lockState(lockPath, nowMs, { allowInvalid = false } = {}) {
 
 function createLock(lockPath, nowMs) {
   const nonce = randomUUID();
-  const fd = openSync(lockPath, "wx", 0o600);
-  writeFileSync(fd, `${JSON.stringify({ pid: process.pid, created_at_ms: nowMs, nonce })}\n`); closeSync(fd);
+  const pending = `${lockPath}.create-${process.pid}-${nonce}`;
+  const fd = openSync(pending, "wx", 0o600);
+  try {
+    try { writeFileSync(fd, `${JSON.stringify({ pid: process.pid, created_at_ms: nowMs, nonce })}\n`); fsyncSync(fd); }
+    finally { closeSync(fd); }
+    linkSync(pending, lockPath);
+  } finally { if (existsSync(pending)) unlinkSync(pending); }
   return nonce;
 }
 
 function replaceStaleLock(lockPath, nowMs) {
-  const initial = lockState(lockPath, nowMs);
+  const initial = lockState(lockPath, nowMs, { allowInvalid: true });
   if (!initial.stale) throw new Error(`finding observation output is locked: ${lockPath}`);
   const nonce = typeof initial.lock?.nonce === "string" ? initial.lock.nonce : "legacy";
   const recovery = `${lockPath}.recovery-${nonce}`;
@@ -47,7 +52,7 @@ function replaceStaleLock(lockPath, nowMs) {
     catch { throw new Error(`finding observation output is locked: ${lockPath}`); }
   }
   try {
-    const current = lockState(lockPath, nowMs);
+    const current = lockState(lockPath, nowMs, { allowInvalid: true });
     if (!current.stale || (initial.lock?.nonce !== undefined && current.lock?.nonce !== initial.lock.nonce)) {
       throw new Error(`finding observation output is locked: ${lockPath}`);
     }
