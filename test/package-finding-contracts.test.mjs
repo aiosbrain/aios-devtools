@@ -13,7 +13,13 @@ test("packed install exposes the exact schema, pin, and reviewed registry", () =
   const packDir = mkdtempSync(path.join(tmpdir(), "finding-pack-"));
   const installDir = mkdtempSync(path.join(tmpdir(), "finding-install-"));
   const packed = JSON.parse(execFileSync("npm", ["pack", "--json", "--pack-destination", packDir], { cwd: ROOT, encoding: "utf8" }));
-  const tarball = path.join(packDir, packed[0].filename);
+  const packRecords = Array.isArray(packed) ? packed : Object.values(packed);
+  assert.equal(packRecords.length, 1, "npm pack must produce exactly one package record");
+  const filename = packRecords[0]?.filename;
+  assert.equal(typeof filename, "string", "npm pack record must name its tarball");
+  assert.match(filename, /^[A-Za-z0-9][A-Za-z0-9._-]*\.tgz$/, "npm pack filename must be a safe basename");
+  assert.equal(path.basename(filename), filename, "npm pack filename must not escape the pack directory");
+  const tarball = path.join(packDir, filename);
   writeFileSync(path.join(installDir, "package.json"), '{"type":"module"}\n');
   execFileSync("npm", ["install", "--ignore-scripts", tarball], { cwd: installDir, stdio: "pipe" });
   const packageRoot = path.join(installDir, "node_modules", "@aiosbrain", "aios-devtools");
