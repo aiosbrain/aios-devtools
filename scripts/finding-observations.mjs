@@ -154,10 +154,11 @@ function codeRabbitRecords(body, item, itemIdentity) {
   for (const [index, potential] of potentialLines.entries()) {
     if (found.some((record) => record.line === potential.line)) continue;
     const token = potential.text.match(/(critical|blocker|major|minor|nitpick)/i)?.[1]?.toLowerCase();
+    const badgeSeverity = ["critical", "blocker"].includes(token) ? "critical" : token === "minor" ? "medium" : token === "nitpick" ? "low" : "high";
     const next = potentialLines[index + 1]?.line ?? lines.length + 1;
-    const hasFollowingLabel = found.some((record) => record.line > potential.line && record.line < next);
+    const hasFollowingLabel = found.some((record) => record.line > potential.line && record.line < next && (!token || record.severity === badgeSeverity));
     if (hasFollowingLabel) continue;
-    found.push({ line: potential.line, severity: ["critical", "blocker"].includes(token) ? "critical" : token === "minor" ? "medium" : token === "nitpick" ? "low" : "high" });
+    found.push({ line: potential.line, severity: badgeSeverity });
   }
   found.sort((a, b) => a.line - b.line);
   if (found.length) return found.map(({ line, severity }, index) => ({

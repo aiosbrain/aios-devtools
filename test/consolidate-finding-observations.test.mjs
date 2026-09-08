@@ -124,6 +124,12 @@ test("finding identity covers legacy heading bodies and mixed CodeRabbit dialect
     inlineComments: [{ path: "src/a.mjs", line: 5, body: "_⚠️ Potential issue_ | _🔴 Critical_\n\n**Credentials leak.**" }],
   }, opts);
   assert.deepEqual(criticalBadge.candidates.map((x) => x.severity), ["critical"]);
+  const mixedBadge = normalizeFindingInventory({
+    ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null, checks: { checks: [] }, issueComments: [{
+      body: "_⚠️ Potential issue_ | _🟠 Major_\n\n**Null input crashes.**\n\n[Low] README.md:1 — Fix the example.",
+    }],
+  }, opts);
+  assert.deepEqual(mixedBadge.candidates.map((x) => x.severity).sort(), ["high", "low"]);
   const bundled = normalizeFindingInventory({
     ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null, checks: { checks: [] }, issueComments: [],
     reviews: [{ body: "_⚠️ Potential issue_ | _🟠 Major_\n\n**Null input crashes.**\n\n_⚠️ Potential issue_ | _🟡 Minor_\n\n**Fallback is incorrect.**" }],
