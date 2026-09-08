@@ -109,6 +109,11 @@ test("finding identity covers legacy heading bodies and mixed CodeRabbit dialect
     issueComments: [{ body: "_⚠️ Potential issue_\n\n**Major:** Null input crashes.\n\nThis is a minor change to the guard." }],
   }, opts);
   assert.deepEqual(oneFinding.candidates.map((x) => x.severity), ["high"]);
+  const badgedLabel = normalizeFindingInventory({
+    ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null, checks: { checks: [] },
+    issueComments: [{ body: "_⚠️ Potential issue_ | _🟠 Major_\n\n**Major:** Null input crashes." }],
+  }, opts);
+  assert.deepEqual(badgedLabel.candidates.map((x) => x.severity), ["high"]);
   const bundled = normalizeFindingInventory({
     ...BASE_INPUTS, localBugbotMarkdown: "BUGBOT_CLEAR", gptMarkdown: null, checks: { checks: [] }, issueComments: [],
     reviews: [{ body: "_⚠️ Potential issue_ | _🟠 Major_\n\n**Null input crashes.**\n\n_⚠️ Potential issue_ | _🟡 Minor_\n\n**Fallback is incorrect.**" }],

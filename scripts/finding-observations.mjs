@@ -137,7 +137,7 @@ function codeRabbitRecords(body, item) {
     const token = potential.text.match(/(major|minor|nitpick)/i)?.[1]?.toLowerCase();
     const next = potentialLines[index + 1]?.line ?? lines.length + 1;
     const hasFollowingLabel = found.some((record) => record.line > potential.line && record.line < next);
-    if (!token && hasFollowingLabel) continue;
+    if (hasFollowingLabel) continue;
     found.push({ line: potential.line, severity: token === "minor" ? "medium" : token === "nitpick" ? "low" : "high" });
   }
   found.sort((a, b) => a.line - b.line);
