@@ -1,9 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { cmdConsolidateFindings } from "../scripts/consolidate-findings.mjs";
+import { acquireAtomicJsonlLease, releaseAtomicJsonlLease } from "../scripts/atomic-jsonl.mjs";
+
+test("a stale recovery guard is claimed without replacing a newer owner", () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "finding-stale-"));
+  const out = path.join(repo, "observations.jsonl"); const lock = `${out}.lease`;
+  const old = Date.now() - 16 * 60 * 1000;
+  writeFileSync(lock, JSON.stringify({ pid: 2147483647, created_at_ms: old, nonce: "old" }));
+  writeFileSync(`${lock}.recovery-old`, JSON.stringify({ pid: 2147483647, created_at_ms: old, nonce: "guard" }));
+  utimesSync(lock, new Date(old), new Date(old)); utimesSync(`${lock}.recovery-old`, new Date(old), new Date(old));
+  const lease = acquireAtomicJsonlLease(out);
+  assert.throws(() => acquireAtomicJsonlLease(out), /locked/);
+  releaseAtomicJsonlLease(lease);
+});
 
 test("one consolidation owns the observation output through provider completion", async () => {
   const repo = mkdtempSync(path.join(tmpdir(), "finding-lease-"));

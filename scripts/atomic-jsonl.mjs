@@ -37,20 +37,36 @@ function createLock(lockPath, nowMs) {
   return nonce;
 }
 
+function acquireRecoveryGuard(lockPath, staleNonce, nowMs, guards = []) {
+  const recovery = `${lockPath}.recovery-${staleNonce}`;
+  try {
+    const nonce = createLock(recovery, nowMs);
+    guards.push({ lockPath: recovery, nonce });
+    return guards;
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    const existing = lockState(recovery, nowMs, { allowInvalid: true });
+    if (!existing.stale) throw new Error(`finding observation output is locked: ${lockPath}`);
+    const nonce = typeof existing.lock?.nonce === "string" ? existing.lock.nonce : "legacy";
+    return acquireRecoveryGuard(recovery, nonce, nowMs, guards);
+  }
+}
+
+function releaseRecoveryGuards(guards) {
+  for (const guard of [...guards].reverse()) {
+    if (!existsSync(guard.lockPath)) continue;
+    try {
+      const current = JSON.parse(readFileSync(guard.lockPath, "utf8"));
+      if (current.nonce === guard.nonce) unlinkSync(guard.lockPath);
+    } catch { /* Never remove a recovery guard no longer provably owned here. */ }
+  }
+}
+
 function replaceStaleLock(lockPath, nowMs) {
   const initial = lockState(lockPath, nowMs, { allowInvalid: true });
   if (!initial.stale) throw new Error(`finding observation output is locked: ${lockPath}`);
   const nonce = typeof initial.lock?.nonce === "string" ? initial.lock.nonce : "legacy";
-  const recovery = `${lockPath}.recovery-${nonce}`;
-  let guard;
-  try { guard = createLock(recovery, nowMs); }
-  catch (error) {
-    if (error.code !== "EEXIST") throw error;
-    if (!lockState(recovery, nowMs, { allowInvalid: true }).stale) throw new Error(`finding observation output is locked: ${lockPath}`);
-    unlinkSync(recovery);
-    try { guard = createLock(recovery, nowMs); }
-    catch { throw new Error(`finding observation output is locked: ${lockPath}`); }
-  }
+  const guards = acquireRecoveryGuard(lockPath, nonce, nowMs);
   try {
     const current = lockState(lockPath, nowMs, { allowInvalid: true });
     if (!current.stale || (initial.lock?.nonce !== undefined && current.lock?.nonce !== initial.lock.nonce)) {
@@ -58,10 +74,7 @@ function replaceStaleLock(lockPath, nowMs) {
     }
     unlinkSync(lockPath);
     return createLock(lockPath, nowMs);
-  } finally {
-    void guard;
-    if (existsSync(recovery)) unlinkSync(recovery);
-  }
+  } finally { releaseRecoveryGuards(guards); }
 }
 
 function acquireLock(lockPath, nowMs) {
