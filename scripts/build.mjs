@@ -47,7 +47,7 @@ import {
   validateBranch,
 } from "./relay-core.mjs";
 import { slugify as slugifyBase } from "./cli-common.mjs";
-import { callAgentModel, promptCallHasTools, requirePromptModelKey, reviewCallForModel } from "./model-call.mjs";
+import { callAgentModel, requirePromptModelKey, reviewCallForModel } from "./model-call.mjs";
 // The verdict matcher is a core-leaf import (severity.mjs); the review engine itself loads
 // via the toolkit seam at point-of-use (AIO-594 F1; docs/devtools-toolkit-contract.md).
 import { hasCriticalOrHighFindings } from "./severity.mjs";
@@ -56,7 +56,7 @@ import { resolveLoopModels } from "./loop-models.mjs";
 import { parseModelRef } from "./model-providers.mjs";
 import { cmdPr } from "./pr.mjs";
 import { loadConstitutionDigest, constitutionPromptLines } from "@aiosbrain/foundation/constitution";
-import { buildCodeReviewPrompt } from "./review-prompt.mjs";
+import { buildCodeReviewPrompt, promptCallHasTools } from "./review-prompt.mjs";
 import { loadSkillContext, parseDeclaredSkills } from "./skill-context.mjs";
 const DEFAULT_REVIEW_SKILL = "/ai-code-review";
 export { buildCodeReviewPrompt };

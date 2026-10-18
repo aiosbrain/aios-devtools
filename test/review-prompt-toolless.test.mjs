@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildCodeReviewPrompt } from "../scripts/review-prompt.mjs";
+import { buildCodeReviewPrompt, promptCallHasTools } from "../scripts/review-prompt.mjs";
 import { buildCodeReviewPrompt as viaBuild } from "../scripts/build.mjs";
-import { promptCallHasTools } from "../scripts/model-call.mjs";
 
 const base = {
   skill: "/ai-code-review",
@@ -29,6 +28,7 @@ test("prompt-only reviewer is told it has no tools and must not emit tool calls"
   assert.doesNotMatch(p, /Run the project's tests\/validators yourself/);
   assert.match(p, /MERGE_READY/);
   assert.match(p, /evidence-based findings/);
+  assert.match(p, /truncated or replaced by a stat[^.]*do not emit the verdict/);
 });
 
 test("toolless prompt names the verification that ran, or says none did", () => {

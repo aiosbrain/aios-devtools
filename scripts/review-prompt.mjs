@@ -3,6 +3,18 @@
 // "run the tests yourself" answers with pseudo tool calls and never produces a verdict, which
 // stalls the loop at BUILD_NONCONVERGENCE with nothing for the builder to fix.
 import { MERGE_READY_TOKEN } from "./relay-core.mjs";
+import { parseModelRef } from "./model-providers.mjs";
+
+/**
+ * Whether the code-review call can actually run commands in the worktree. Only cursor (--force
+ * --trust) and codex (read-only sandbox) can; deepseek/openrouter/opencode are plain chat
+ * completions and claude runs with NO_TOOLS_ARGS. Keep in step with callPromptModel's switch in
+ * model-call.mjs (a byte-copy of core's, so the predicate lives here).
+ */
+export function promptCallHasTools(model) {
+  const { provider } = parseModelRef(model);
+  return provider === "cursor" || provider === "codex";
+}
 
 const TOOLED_NOTE =
   "Run the project's tests/validators yourself to gather evidence before you decide.";
@@ -13,7 +25,9 @@ const toollessNote = (verifyCmd) =>
     ? `The tool already ran \`${verifyCmd}\` on this exact diff and only reaches you when it passed. `
     : "No verification command was configured, so nothing has been run on this diff; say what you could not verify. ") +
   "Judge the diff below against the plan and answer in plain text with evidence-based findings " +
-  "(file and line from the diff) and, only if it is truly ready, the verdict token.";
+  "(file and line from the diff) and, only if it is truly ready, the verdict token. If the diff " +
+  "below is truncated or replaced by a stat, you cannot inspect the change: do not emit the verdict " +
+  "token, and list what you could not see.";
 
 export function buildCodeReviewPrompt({
   skill,
