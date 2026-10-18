@@ -816,9 +816,8 @@ function runSecretsScan(repo, worktree, baseSha) {
   }
 }
 
-// Optional verification gate (e.g. `--verify "npm test"`). Runs the user's command
-// in the worktree and captures pass/fail + a tail of output. The command is supplied
-// by the operator (same trust as running it themselves), so a shell is acceptable.
+// Optional verification gate (e.g. `--verify "npm test"`): runs the operator's command
+// (same trust as running it themselves, so a shell is fine) and captures pass/fail + tail.
 export function runVerification(worktree, cmd) {
   try {
     const out = execFileSync(cmd, {
@@ -826,14 +825,12 @@ export function runVerification(worktree, cmd) {
       shell: true,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      // Node's default maxBuffer is 1 MiB; a passing `npm test` prints ~2.5 MB, and an
-      // overflow throws ENOBUFS, which this catch would report as "verify failed".
+      // Default 1 MiB overflows on a passing `npm test` (~2.5 MB): ENOBUFS = false "verify failed".
       maxBuffer: 64 * 1024 * 1024,
     });
     return { ok: true, output: out.slice(-3000) };
   } catch (e) {
-    const out = `${e.stdout ?? ""}${e.stderr ?? ""}`;
-    return { ok: false, output: out.slice(-3000) };
+    return { ok: false, output: `${e.stdout ?? ""}${e.stderr ?? ""}`.slice(-3000) };
   }
 }
 
