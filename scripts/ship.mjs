@@ -12,8 +12,7 @@
  * code rather than hanging (cron safety). Recon reads ONLY git-tracked, deny-filtered files
  * (extractRepoFileRefs) so untrusted Linear text can never exfiltrate secrets/paths.
  *
- * The orchestration (runShip/cmdShip) takes injected deps so the whole pipeline is testable
- * without touching the network, git, gh, claude, or cursor.
+ * The orchestration (runShip/cmdShip) takes injected deps so the pipeline is testable offline.
  */
 
 import { readFileSync, statSync, existsSync } from "node:fs";
@@ -30,6 +29,7 @@ import {
 } from "./relay-core.mjs";
 import { runBuild, slugify } from "./build.mjs";
 import { cmdPr, detectRepo } from "./pr.mjs";
+import { moveIssueToInProgress } from "./ship/linear-state.mjs";
 import { cmdConsolidateFindings, defaultOutPath } from "./consolidate-findings.mjs";
 import { resolveLoopModels } from "./loop-models.mjs";
 import { modelFamily } from "./model-providers.mjs";
@@ -736,8 +736,7 @@ export async function runShip({ repo, issue: issueId, opts, deps }) {
   }
 
   // ── 4. BUILD ─────────────────────────────────────────────────────────────────
-  // On resume, the CHECKPOINTED branch/worktree win: recomputing from the Linear title would
-  // silently retarget every later stage if the title was edited between runs (review r1, High).
+  // On resume the CHECKPOINTED branch/worktree win: a title edited between runs must not retarget later stages.
   const branch = state.branch ?? `feat/${issue.identifier}-${slugify(issue.title)}`;
   const worktreePath =
     state.worktreePath ?? path.resolve(repo, "..", `${path.basename(repo)}-${slugify(branch)}`);
@@ -853,6 +852,7 @@ export async function runShip({ repo, issue: issueId, opts, deps }) {
     progress(`build: resumed from checkpoint (branch ${branch})`);
   } else {
     progress("build: started");
+    await moveIssueToInProgress(linear, issueId, progress);
     let buildCode;
     try {
       buildCode = await runBuildDep({
