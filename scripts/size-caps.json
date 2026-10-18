@@ -18,7 +18,7 @@
   "**/coverage/**"
  ],
  "grandfathered": {
-  "scripts/build.mjs": 1541,
+  "scripts/build.mjs": 1483,
   "scripts/consolidate-findings.mjs": 794,
   "scripts/roadmap-run.mjs": 643,
   "scripts/ship.mjs": 1755,

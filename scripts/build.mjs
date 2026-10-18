@@ -56,8 +56,10 @@ import { resolveLoopModels } from "./loop-models.mjs";
 import { parseModelRef } from "./model-providers.mjs";
 import { cmdPr } from "./pr.mjs";
 import { loadConstitutionDigest, constitutionPromptLines } from "@aiosbrain/foundation/constitution";
+import { buildCodeReviewPrompt, promptCallHasTools } from "./review-prompt.mjs";
 import { loadSkillContext, parseDeclaredSkills } from "./skill-context.mjs";
 const DEFAULT_REVIEW_SKILL = "/ai-code-review";
+export { buildCodeReviewPrompt };
 export const BASE_SHA_MARK = ".aios-build-base-sha";
 // Builder = Opus via Claude Code; reviewer = Cursor /ai-code-review. This mirrors the
 // plan phase (Opus produces, Cursor reviews) and keeps model diversity in the loop.
@@ -419,67 +421,6 @@ export function buildImplementPrompt(
   return parts.join("\n");
 }
 
-export function buildCodeReviewPrompt({
-  skill,
-  plan,
-  diff,
-  diffStat,
-  logOneline,
-  secretsResult,
-  branch,
-  round,
-  maxRounds,
-  builderSkillAudit = [],
-}) {
-  const isLast = round >= maxRounds;
-  const roundNote = isLast
-    ? `**Final round (${round}/${maxRounds}). Do not raise new Low/Medium nits — but you MUST still withhold ${MERGE_READY_TOKEN} for any Critical/High finding or any unverified safety-critical surface.**`
-    : `Round ${round} of ${maxRounds}.`;
-
-  return [
-    skill,
-    "",
-    `> ${roundNote}`,
-    "",
-    `You are reviewing a diff that is supposed to implement the plan below, on branch \`${branch}\` in an isolated worktree. Run the project's tests/validators yourself to gather evidence before you decide.`,
-    "",
-    "## Original plan (what the diff must deliver)",
-    "",
-    plan,
-    "",
-    ...(builderSkillAudit.length
-      ? [
-          "## Builder skill conformance",
-          "",
-          ...builderSkillAudit.map(
-            (entry) => `- ${entry.id} sha256=${entry.sha256} bytes=${entry.bytes}`
-          ),
-          "",
-          "Verify the implementation honors the applicable hard constraints of these selected skills.",
-          "",
-        ]
-      : []),
-    "## Commits (base..HEAD)",
-    "",
-    logOneline || "(none)",
-    "",
-    "## git diff --stat",
-    "",
-    diffStat || "(empty)",
-    "",
-    "## git diff",
-    "",
-    diff,
-    "",
-    "## Pre-merge secrets scan (run by the tool)",
-    "",
-    secretsResult,
-    "Note: the tool re-runs this scan fail-closed before any merge — a leak blocks the merge regardless of your verdict.",
-    "",
-    "---",
-    `Review per your skill. Emit ${MERGE_READY_TOKEN} (alone on the very last line) ONLY when the code is truly ready to merge. Otherwise list the findings for the builder to fix.`,
-  ].join("\n");
-}
 
 // ── impure helpers ────────────────────────────────────────────────────────────
 
@@ -1218,6 +1159,7 @@ export async function runBuild({ repo, plan, branch, opts }) {
       round,
       maxRounds: rounds,
       builderSkillAudit: builderContext.audit,
+      toolless: !promptCallHasTools(models.code_review.model), verifyCmd: verify || null,
     });
     // Per-round review timeout: explicit (operator-set) wins; otherwise adapt to this round's
     // real review payload size. Logged so the choice is visible in the console + --log trail.
