@@ -302,6 +302,16 @@ export function requirePromptModelKey(model, step) {
   }
 }
 
+/**
+ * Whether a prompt-model call can actually run commands in the worktree. Only cursor (--force
+ * --trust) and codex (read-only sandbox) can; deepseek/openrouter/opencode are plain chat
+ * completions and claude runs with NO_TOOLS_ARGS. Keep in step with the switch below.
+ */
+export function promptCallHasTools(model) {
+  const { provider } = parseModelRef(model);
+  return provider === "cursor" || provider === "codex";
+}
+
 /** Route a single-shot model call by resolved provider. */
 export async function callPromptModel({ model, prompt, timeoutMs, opts = {} }) {
   const ref = parseModelRef(model);

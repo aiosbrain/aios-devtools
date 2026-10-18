@@ -6,11 +6,14 @@ import { MERGE_READY_TOKEN } from "./relay-core.mjs";
 
 const TOOLED_NOTE =
   "Run the project's tests/validators yourself to gather evidence before you decide.";
-const TOOLLESS_NOTE =
+const toollessNote = (verifyCmd) =>
   "You have NO tools in this session: do not run commands and never emit tool calls or " +
-  "function-call markup. The tool already ran the project's verification (build, tests, lint, " +
-  "format) on this exact diff and only reaches you when it passed. Judge the diff below against " +
-  "the plan and answer in plain text with your findings and, if ready, the verdict token.";
+  "function-call markup. " +
+  (verifyCmd
+    ? `The tool already ran \`${verifyCmd}\` on this exact diff and only reaches you when it passed. `
+    : "No verification command was configured, so nothing has been run on this diff; say what you could not verify. ") +
+  "Judge the diff below against the plan and answer in plain text with evidence-based findings " +
+  "(file and line from the diff) and, only if it is truly ready, the verdict token.";
 
 export function buildCodeReviewPrompt({
   skill,
@@ -24,13 +27,14 @@ export function buildCodeReviewPrompt({
   maxRounds,
   builderSkillAudit = [],
   toolless = false,
+  verifyCmd = null,
 }) {
   const isLast = round >= maxRounds;
   const roundNote = isLast
     ? `**Final round (${round}/${maxRounds}). Do not raise new Low/Medium nits — but you MUST still withhold ${MERGE_READY_TOKEN} for any Critical/High finding or any unverified safety-critical surface.**`
     : `Round ${round} of ${maxRounds}.`;
 
-  const evidenceNote = toolless ? TOOLLESS_NOTE : TOOLED_NOTE;
+  const evidenceNote = toolless ? toollessNote(verifyCmd) : TOOLED_NOTE;
 
   return [
     skill,

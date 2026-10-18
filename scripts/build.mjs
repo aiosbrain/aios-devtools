@@ -47,13 +47,13 @@ import {
   validateBranch,
 } from "./relay-core.mjs";
 import { slugify as slugifyBase } from "./cli-common.mjs";
-import { callAgentModel, requirePromptModelKey, reviewCallForModel } from "./model-call.mjs";
+import { callAgentModel, promptCallHasTools, requirePromptModelKey, reviewCallForModel } from "./model-call.mjs";
 // The verdict matcher is a core-leaf import (severity.mjs); the review engine itself loads
 // via the toolkit seam at point-of-use (AIO-594 F1; docs/devtools-toolkit-contract.md).
 import { hasCriticalOrHighFindings } from "./severity.mjs";
 import { loadToolkitModule, stripToolkitDirArgs } from "./toolkit-locate.mjs";
 import { resolveLoopModels } from "./loop-models.mjs";
-import { isAgenticProvider, parseModelRef } from "./model-providers.mjs";
+import { parseModelRef } from "./model-providers.mjs";
 import { cmdPr } from "./pr.mjs";
 import { loadConstitutionDigest, constitutionPromptLines } from "@aiosbrain/foundation/constitution";
 import { buildCodeReviewPrompt } from "./review-prompt.mjs";
@@ -1159,7 +1159,7 @@ export async function runBuild({ repo, plan, branch, opts }) {
       round,
       maxRounds: rounds,
       builderSkillAudit: builderContext.audit,
-      toolless: !isAgenticProvider(reviewerProvider),
+      toolless: !promptCallHasTools(models.code_review.model), verifyCmd: verify || null,
     });
     // Per-round review timeout: explicit (operator-set) wins; otherwise adapt to this round's
     // real review payload size. Logged so the choice is visible in the console + --log trail.
